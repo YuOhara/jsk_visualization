@@ -23,7 +23,7 @@ find_package(Boost REQUIRED COMPONENTS system)
 
 add_message_files(
   DIRECTORY msg
-  FILES JointTrajectoryPointWithType.msg JointTrajectoryWithType.msg MarkerDimensions.msg MarkerMenu.msg MarkerPose.msg MoveModel.msg MoveObject.msg
+  FILES JointTrajectoryPointWithType.msg JointTrajectoryWithType.msg MarkerDimensions.msg MarkerMenu.msg MarkerPose.msg MoveModel.msg MoveObject.msg AssocMarker.msg
 )
 add_service_files(DIRECTORY srv
   FILES MarkerSetPose.srv SetPose.srv GetJointState.srv GetType.srv SetMarkerDimensions.srv GetMarkerDimensions.srv GetTransformableMarkerPose.srv SetTransformableMarkerPose.srv GetTransformableMarkerColor.srv SetTransformableMarkerColor.srv GetTransformableMarkerFocus.srv SetTransformableMarkerFocus.srv GetTransformableMarkerExistence.srv IndexRequest.srv)
@@ -92,6 +92,11 @@ add_dependencies(bounding_box_marker ${PROJECT_NAME}_generate_messages_cpp ${PRO
 add_executable(interactive_point_cloud src/interactive_point_cloud_node.cpp src/interactive_point_cloud.cpp src/interactive_marker_helpers.cpp)
 target_link_libraries(interactive_point_cloud ${catkin_LIBRARIES} ${orocos_kdl_LIBRARIES} ${Boost_LIBRARIES})
 add_dependencies(interactive_point_cloud ${PROJECT_NAME}_generate_messages_cpp ${PROJECT_NAME}_gencfg ${catkin_EXPORTED_TARGETS})
+
+add_executable(assoc_marker src/assoc_marker.cpp)
+target_link_libraries(assoc_marker ${catkin_LIBRARIES} ${orocos_kdl_LIBRARIES} ${Boost_LIBRARIES})
+add_dependencies(assoc_marker ${PROJECT_NAME}_generate_messages_cpp)
+
 
 add_executable(pointcloud_cropper src/pointcloud_cropper.cpp
   src/interactive_marker_helpers.cpp)
