@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package>
   <name>jsk_rviz_plugins</name>
-  <version>1.0.18</version>
+  <version>1.0.27</version>
   <description>The jsk_rviz_plugins package</description>
   <maintainer email="k-okada@jsk.t.u-tokyo.ac.jp">Kei Okada</maintainer>
   <license>BSD</license>
@@ -17,21 +17,23 @@
   <build_depend>rviz</build_depend>
   <build_depend>jsk_hark_msgs</build_depend>
   <build_depend>jsk_footstep_msgs</build_depend>
-  <build_depend>jsk_pcl_ros</build_depend>
+  <build_depend>jsk_recognition_utils</build_depend>
   <build_depend>wxwidgets</build_depend>
   <build_depend>message_generation</build_depend>
   <build_depend>std_msgs</build_depend>
   <build_depend>diagnostic_msgs</build_depend>
   <build_depend>cv_bridge</build_depend>
+  <build_depend>dynamic_reconfigure</build_depend>
   <run_depend>rviz</run_depend>
   <run_depend>jsk_hark_msgs</run_depend>
   <run_depend>jsk_footstep_msgs</run_depend>
-  <run_depend>jsk_pcl_ros</run_depend>
+  <run_depend>jsk_recognition_utils</run_depend>
   <run_depend>wxwidgets</run_depend>
   <run_depend>message_generation</run_depend>
   <run_depend>std_msgs</run_depend>
   <run_depend>diagnostic_msgs</run_depend>
   <run_depend>cv_bridge</run_depend>
+  <run_depend>dynamic_reconfigure</run_depend>
   <build_depend>people_msgs</build_depend>
   <run_depend>people_msgs</run_depend>
   <build_depend>image_geometry</build_depend>

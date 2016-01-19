@@ -1,3 +1,39 @@
+// -*- mode: c++ -*-
+/*********************************************************************
+ * Software License Agreement (BSD License)
+ *
+ *  Copyright (c) 2015, JSK Lab
+ *  All rights reserved.
+ *
+ *  Redistribution and use in source and binary forms, with or without
+ *  modification, are permitted provided that the following conditions
+ *  are met:
+ *
+ *   * Redistributions of source code must retain the above copyright
+ *     notice, this list of conditions and the following disclaimer.
+ *   * Redistributions in binary form must reproduce the above
+ *     copyright notice, this list of conditions and the following
+ *     disclaimer in the documentation and/o2r other materials provided
+ *     with the distribution.
+ *   * Neither the name of the JSK Lab nor the names of its
+ *     contributors may be used to endorse or promote products derived
+ *     from this software without specific prior written permission.
+ *
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ *  FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ *  COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ *  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ *  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ *  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ *  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ *  ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
+ *********************************************************************/
+
+#define BOOST_PARAMETER_MAX_ARITY 7
 #include <iostream>
 #include <interactive_markers/tools.h>
 #include <jsk_interactive_marker/footstep_marker.h>
@@ -11,73 +47,94 @@
 #include <eigen_conversions/eigen_msg.h>
 #include <tf_conversions/tf_eigen.h>
 #include <jsk_pcl_ros/geo_util.h>
+#include <jsk_pcl_ros/pcl_conversion_util.h>
+#include <jsk_pcl_ros/tf_listener_singleton.h>
+#include <jsk_interactive_marker/SnapFootPrint.h>
+#include <jsk_interactive_marker/SnapFootPrintInput.h>
+#include <jsk_interactive_marker/SetHeuristic.h>
+#include <jsk_topic_tools/log_utils.h>
 
 FootstepMarker::FootstepMarker():
 ac_("footstep_planner", true), ac_exec_("footstep_controller", true),
-  plan_run_(false) {
+plan_run_(false), lleg_first_(true) {
   // read parameters
   tf_listener_.reset(new tf::TransformListener);
   ros::NodeHandle pnh("~");
   ros::NodeHandle nh;
+  srv_ = boost::make_shared <dynamic_reconfigure::Server<Config> > (pnh);
+  typename dynamic_reconfigure::Server<Config>::CallbackType f =
+    boost::bind (&FootstepMarker::configCallback, this, _1, _2);
+  srv_->setCallback (f);
   pnh.param("foot_size_x", foot_size_x_, 0.247);
   pnh.param("foot_size_y", foot_size_y_, 0.135);
   pnh.param("foot_size_z", foot_size_z_, 0.01);
   pnh.param("lfoot_frame_id", lfoot_frame_id_, std::string("lfsensor"));
   pnh.param("rfoot_frame_id", rfoot_frame_id_, std::string("rfsensor"));
   pnh.param("show_6dof_control", show_6dof_control_, true);
+  // pnh.param("use_projection_service", use_projection_service_, false);
+  // pnh.param("use_projection_topic", use_projection_topic_, false);
+  pnh.param("always_planning", always_planning_, true);
+  // if (use_projection_topic_) {
+    project_footprint_pub_ = pnh.advertise<jsk_interactive_marker::SnapFootPrintInput>("project_footprint", 1);
+  // }
   // read lfoot_offset
   readPoseParam(pnh, "lfoot_offset", lleg_offset_);
   readPoseParam(pnh, "rfoot_offset", rleg_offset_);
   
   pnh.param("footstep_margin", footstep_margin_, 0.2);
   pnh.param("use_footstep_planner", use_footstep_planner_, true);
-  pnh.param("use_plane_snap", use_plane_snap_, true);
+
   pnh.param("use_footstep_controller", use_footstep_controller_, true);
   pnh.param("use_initial_footstep_tf", use_initial_footstep_tf_, true);
   pnh.param("wait_snapit_server", wait_snapit_server_, false);
+  bool nowait = true;
+  pnh.param("no_wait", nowait, true);
   pnh.param("frame_id", marker_frame_id_, std::string("/map"));
   footstep_pub_ = nh.advertise<jsk_footstep_msgs::FootstepArray>("footstep_from_marker", 1);
   snapit_client_ = nh.serviceClient<jsk_pcl_ros::CallSnapIt>("snapit");
   snapped_pose_pub_ = pnh.advertise<geometry_msgs::PoseStamped>("snapped_pose", 1);
+  current_pose_pub_ = pnh.advertise<geometry_msgs::PoseStamped>("current_pose", 1);
   estimate_occlusion_client_ = nh.serviceClient<std_srvs::Empty>("require_estimation");
-  if (wait_snapit_server_) {
+  if (!nowait && wait_snapit_server_) {
     snapit_client_.waitForExistence();
-  }
-  
-  if (use_plane_snap_) {
-    //plane_sub_ = pnh.subscribe("planes", 1, &FootstepMarker::planesCB, this);
-    polygons_sub_.subscribe(pnh, "planes", 1);
-    coefficients_sub_.subscribe(pnh, "planes_coefficients", 1);
-    sync_ = boost::make_shared<message_filters::Synchronizer<PlaneSyncPolicy> >(100);
-    sync_->connectInput(polygons_sub_, coefficients_sub_);
-    sync_->registerCallback(boost::bind(&FootstepMarker::planeCB,
-                                        this, _1, _2));
   }
   
   if (pnh.getParam("initial_reference_frame", initial_reference_frame_)) {
     use_initial_reference_ = true;
+    JSK_ROS_INFO_STREAM("initial_reference_frame: " << initial_reference_frame_);
   }
   else {
     use_initial_reference_ = false;
+    JSK_ROS_INFO("initial_reference_frame is not specified ");
   }
 
   server_.reset( new interactive_markers::InteractiveMarkerServer(ros::this_node::getName()));
-  menu_handler_.insert( "Snap Legs",
-                        boost::bind(&FootstepMarker::menuFeedbackCB, this, _1));
-  menu_handler_.insert( "Reset Legs",
+  // menu_handler_.insert( "Snap Legs",
+  //                       boost::bind(&FootstepMarker::menuFeedbackCB, this, _1));
+  // menu_handler_.insert( "Reset Legs",
+  //                       boost::bind(&FootstepMarker::menuFeedbackCB, this, _1));
+  menu_handler_.insert( "Look Ground",
                         boost::bind(&FootstepMarker::menuFeedbackCB, this, _1));
   menu_handler_.insert( "Execute the Plan",
                         boost::bind(&FootstepMarker::menuFeedbackCB, this, _1));
   menu_handler_.insert( "Force to replan",
                         boost::bind(&FootstepMarker::menuFeedbackCB, this, _1));
-  menu_handler_.insert( "Estimate occlusion",
-                        boost::bind(&FootstepMarker::menuFeedbackCB, this, _1));
+  // menu_handler_.insert( "Estimate occlusion",
+  //                       boost::bind(&FootstepMarker::menuFeedbackCB, this, _1));
   menu_handler_.insert( "Cancel Walk",
                         boost::bind(&FootstepMarker::menuFeedbackCB, this, _1));
   menu_handler_.insert( "Toggle 6dof marker",
                         boost::bind(&FootstepMarker::menuFeedbackCB, this, _1));
-  menu_handler_.insert( "Resume Footstep",
-                      boost::bind(&FootstepMarker::menuFeedbackCB, this, _1));
+  // menu_handler_.insert( "Resume Footstep",
+  //                     boost::bind(&FootstepMarker::menuFeedbackCB, this, _1));
+  menu_handler_.insert("Straight Heuristic",
+                       boost::bind(&FootstepMarker::menuFeedbackCB, this, _1));
+  menu_handler_.insert("Stepcost Heuristic**",
+                       boost::bind(&FootstepMarker::menuFeedbackCB, this, _1));
+  menu_handler_.insert("LLeg First",
+                       boost::bind(&FootstepMarker::menuFeedbackCB, this, _1));
+  menu_handler_.insert("RLeg First",
+                       boost::bind(&FootstepMarker::menuFeedbackCB, this, _1));
   marker_pose_.header.frame_id = marker_frame_id_;
   marker_pose_.header.stamp = ros::Time::now();
   marker_pose_.pose.orientation.w = 1.0;
@@ -92,48 +149,35 @@ ac_("footstep_planner", true), ac_exec_("footstep_controller", true),
   
   if (use_initial_reference_) {
     while (ros::ok()) {
-      if (tf_listener_->waitForTransform(marker_frame_id_, initial_reference_frame_,
-                                         ros::Time(0.0), ros::Duration(10.0))) {
+      try {
+        if (!tf_listener_->waitForTransform(marker_frame_id_, initial_reference_frame_,
+                                            ros::Time(0.0), ros::Duration(10.0))) {
+          ROS_INFO_THROTTLE(1.0,
+                            "waiting for transform %s => %s", marker_frame_id_.c_str(),
+                            initial_reference_frame_.c_str());
+          continue;
+        }
+        ROS_INFO("resolved transform %s => %s", marker_frame_id_.c_str(),
+                 initial_reference_frame_.c_str());
+        tf::StampedTransform transform;
+        tf_listener_->lookupTransform(marker_frame_id_, initial_reference_frame_,
+                                      ros::Time(0), transform);
+        marker_pose_.pose.position.x = transform.getOrigin().x();
+        marker_pose_.pose.position.y = transform.getOrigin().y();
+        marker_pose_.pose.position.z = transform.getOrigin().z();
+        marker_pose_.pose.orientation.x = transform.getRotation().x();
+        marker_pose_.pose.orientation.y = transform.getRotation().y();
+        marker_pose_.pose.orientation.z = transform.getRotation().z();
+        marker_pose_.pose.orientation.w = transform.getRotation().w();
         break;
       }
-      ROS_INFO("waiting for transform %s => %s", marker_frame_id_.c_str(),
-               initial_reference_frame_.c_str());
+      catch (tf2::TransformException& e) {
+        ROS_ERROR("Failed to lookup transformation: %s", e.what());
+      }
     }
-    ROS_INFO("resolved transform %s => %s", marker_frame_id_.c_str(),
-             initial_reference_frame_.c_str());
-    tf::StampedTransform transform;
-    tf_listener_->lookupTransform(marker_frame_id_, initial_reference_frame_,
-                                  ros::Time(0), transform);
-    marker_pose_.pose.position.x = transform.getOrigin().x();
-    marker_pose_.pose.position.y = transform.getOrigin().y();
-    marker_pose_.pose.position.z = transform.getOrigin().z();
-    marker_pose_.pose.orientation.x = transform.getRotation().x();
-    marker_pose_.pose.orientation.y = transform.getRotation().y();
-    marker_pose_.pose.orientation.z = transform.getRotation().z();
-    marker_pose_.pose.orientation.w = transform.getRotation().w();
   }
 
   initializeInteractiveMarker();
-  
-  move_marker_sub_ = nh.subscribe("move_marker", 1, &FootstepMarker::moveMarkerCB, this);
-  menu_command_sub_ = nh.subscribe("menu_command", 1, &FootstepMarker::menuCommandCB, this);
-  exec_sub_ = pnh.subscribe("execute", 1, &FootstepMarker::executeCB, this);
-  resume_sub_ = pnh.subscribe("resume", 1, &FootstepMarker::resumeCB, this);
-  if (use_initial_footstep_tf_) {
-    // waiting TF
-    while (ros::ok()) {
-      if (tf_listener_->waitForTransform(lfoot_frame_id_, marker_frame_id_,
-                                         ros::Time(0.0), ros::Duration(10.0))
-          && tf_listener_->waitForTransform(rfoot_frame_id_, marker_frame_id_,
-                                            ros::Time(0.0), ros::Duration(10.0))) {
-        break;
-      }
-      ROS_INFO("waiting for transform {%s, %s} => %s", lfoot_frame_id_.c_str(),
-               rfoot_frame_id_.c_str(), marker_frame_id_.c_str());
-    }
-    ROS_INFO("resolved transform {%s, %s} => %s", lfoot_frame_id_.c_str(),
-             rfoot_frame_id_.c_str(), marker_frame_id_.c_str());
-  }
 
   if (use_footstep_planner_) {
     ROS_INFO("waiting planner server...");
@@ -145,6 +189,44 @@ ac_("footstep_planner", true), ac_exec_("footstep_controller", true),
     ac_exec_.waitForServer();
     ROS_INFO("found controller server...");
   }
+  
+  move_marker_sub_ = nh.subscribe("move_marker", 1, &FootstepMarker::moveMarkerCB, this);
+  menu_command_sub_ = nh.subscribe("menu_command", 1, &FootstepMarker::menuCommandCB, this);
+  exec_sub_ = pnh.subscribe("execute", 1, &FootstepMarker::executeCB, this);
+  resume_sub_ = pnh.subscribe("resume", 1, &FootstepMarker::resumeCB, this);
+  plan_if_possible_srv_ = pnh.advertiseService("force_to_replan", &FootstepMarker::forceToReplan, this);
+  if (use_initial_footstep_tf_) {
+    // waiting TF
+    while (ros::ok()) {
+      try {
+      if (tf_listener_->waitForTransform(lfoot_frame_id_, marker_frame_id_,
+                                         ros::Time(0.0), ros::Duration(10.0))
+          && tf_listener_->waitForTransform(rfoot_frame_id_, marker_frame_id_,
+                                            ros::Time(0.0), ros::Duration(10.0))) {
+        break;
+      }
+      ROS_INFO("waiting for transform {%s, %s} => %s", lfoot_frame_id_.c_str(),
+               rfoot_frame_id_.c_str(), marker_frame_id_.c_str());
+      }
+      catch (tf2::TransformException& e) {
+        ROS_ERROR("Failed to lookup transformation: %s", e.what());
+      }
+    }
+    ROS_INFO("resolved transform {%s, %s} => %s", lfoot_frame_id_.c_str(),
+             rfoot_frame_id_.c_str(), marker_frame_id_.c_str());
+  }
+  // if (use_projection_topic_) {
+    projection_sub_ = pnh.subscribe("projected_pose", 1,
+                                    &FootstepMarker::projectionCallback, this);
+  // }
+}
+
+void FootstepMarker::configCallback(Config& config, uint32_t level)
+{
+  boost::mutex::scoped_lock lock(plane_mutex_);
+  use_projection_topic_ = config.use_projection_topic;
+  use_projection_service_ = config.use_projection_service;
+  use_plane_snap_ = config.use_plane_snap;
 }
 
 // a function to read double value from XmlRpcValue.
@@ -295,64 +377,101 @@ void FootstepMarker::menuCommandCB(const std_msgs::UInt8::ConstPtr& msg) {
 
 void FootstepMarker::updateInitialFootstep() {
   //ROS_INFO("updateInitialFootstep");
-  if (!use_initial_footstep_tf_) {
-    return;
-  } 
-  tf::StampedTransform lfoot_transform, rfoot_transform;
-  tf_listener_->lookupTransform(marker_frame_id_, lfoot_frame_id_, ros::Time(0.0), lfoot_transform);
-  tf_listener_->lookupTransform(marker_frame_id_, rfoot_frame_id_, ros::Time(0.0), rfoot_transform);
+  try {
+    if (!use_initial_footstep_tf_) {
+      return;
+    } 
+    tf::StampedTransform lfoot_transform, rfoot_transform;
+    tf_listener_->lookupTransform(marker_frame_id_, lfoot_frame_id_, ros::Time(0.0), lfoot_transform);
+    tf_listener_->lookupTransform(marker_frame_id_, rfoot_frame_id_, ros::Time(0.0), rfoot_transform);
 
-  // apply offset
-  // convert like tf -> eigen -> msg
-  Eigen::Affine3d le, re;
-  tf::transformTFToEigen(lfoot_transform * lleg_offset_, le); // tf -> eigen
-  tf::poseEigenToMsg(le, lleg_initial_pose_);  // eigen -> msg
-  tf::transformTFToEigen(rfoot_transform * rleg_offset_, re); // tf -> eigen
-  tf::poseEigenToMsg(re, rleg_initial_pose_);  // eigen -> msg
+    // apply offset
+    // convert like tf -> eigen -> msg
+    Eigen::Affine3d le, re;
+    tf::transformTFToEigen(lfoot_transform * lleg_offset_, le); // tf -> eigen
+    tf::poseEigenToMsg(le, lleg_initial_pose_);  // eigen -> msg
+    tf::transformTFToEigen(rfoot_transform * rleg_offset_, re); // tf -> eigen
+    tf::poseEigenToMsg(re, rleg_initial_pose_);  // eigen -> msg
   
-  // we need to move the marker
-  initializeInteractiveMarker();
+    // we need to move the marker
+    initializeInteractiveMarker();
+  }
+  catch (tf2::TransformException& e) {
+    ROS_ERROR("Failed to lookup transformation: %s", e.what());
+  }
+}
+
+void FootstepMarker::lookGround()
+{
+  std_srvs::Empty empty;
+  if (ros::service::call("/lookaround_ground", empty)) {
+    ROS_INFO("Finished to look ground");
+  }
+  else {
+    ROS_ERROR("Failed to look ground");
+  }
+}
+
+bool FootstepMarker::forceToReplan(std_srvs::Empty::Request& req, std_srvs::Empty::Request& res)
+{
+  planIfPossible();
+  return true;
 }
 
 void FootstepMarker::processMenuFeedback(uint8_t menu_entry_id) {
   switch (menu_entry_id) {
-  case 1: {                     // snapit
-    snapLegs();
-    initializeInteractiveMarker();
+  case 1: {                     // look ground
+    lookGround();
     break;
   }
-  case 2: {
-    resetLegPoses();
-    initializeInteractiveMarker();
-    break;
-  }
-  case 3: {                     // execute
+  case 2: {                     // execute
     executeCB(std_msgs::Empty::ConstPtr());
     break;
   }
-  case 4: {                     // replan
+  case 3: {                     // replan
     planIfPossible();
     break;
   }
-  case 5: {                     // estimate
-    callEstimateOcclusion();
-    break;
-  }
-  case 6: {                     // cancel walk
+  case 4: {                     // cancel walk
     cancelWalk();
     break;
   }
-  case 7: {                     // toggle 6dof marker
+  case 5: {                     // toggle 6dof marker
     show_6dof_control_ = !show_6dof_control_;
     break;
   }
-  case 8: {                     // resume
-    resumeCB(std_msgs::Empty::ConstPtr());
+  case 6: {                     // toggle 6dof marker
+    changePlannerHeuristic(":straight-heuristic");
     break;
   }
+  case 7: {                     // toggle 6dof marker
+    changePlannerHeuristic(":stepcost-heuristic**");
+    break;
+  }
+  case 8: {                     // toggle 6dof marker
+    lleg_first_ = true;
+    break;
+  }
+  case 9: {                     // toggle 6dof marker
+    lleg_first_ = false;
+    break;
+  }
+    
   default: {
     break;
   }
+  }
+}
+
+void FootstepMarker::changePlannerHeuristic(const std::string& heuristic)
+{
+  jsk_interactive_marker::SetHeuristic heuristic_req;
+  heuristic_req.request.heuristic = heuristic;
+  if (!ros::service::call("/footstep_planner/set_heuristic", heuristic_req)) {
+    JSK_ROS_ERROR("failed to set heuristic");
+  }
+  else {
+    JSK_ROS_INFO("Success to set heuristic: %s", heuristic.c_str());
   }
 }
 
@@ -369,142 +488,51 @@ void FootstepMarker::callEstimateOcclusion()
   estimate_occlusion_client_.call(srv);
 }
 
-double FootstepMarker::projectPoseToPlane(
-  const std::vector<geometry_msgs::PointStamped>& polygon,
-  const geometry_msgs::PoseStamped& point,
-  geometry_msgs::PoseStamped& foot)
-{
-#ifdef PROJECT_DEBUG
-  ROS_INFO("---------");
-#endif
-  jsk_pcl_ros::ConvexPolygon::Vertices vertices;
-  for (size_t i = 0; i < polygon.size(); i++) {
-    geometry_msgs::Point p = polygon[i].point;
-    jsk_pcl_ros::ConvexPolygon::Vertex v (p.x, p.y, p.z);
-    //ROS_INFO("v[%lu] - [%f, %f, %f]", i, v[0], v[1], v[2]);
-    vertices.push_back(v);
-  }
-  jsk_pcl_ros::ConvexPolygon convex(vertices);
-  Eigen::Vector3f orig(polygon[1].point.x, polygon[1].point.y, polygon[1].point.z);
-  Eigen::Vector3f A(polygon[0].point.x, polygon[0].point.y, polygon[0].point.z);
-  Eigen::Vector3f B(polygon[2].point.x, polygon[2].point.y, polygon[2].point.z);
-  Eigen::Vector3f normal = (B - orig).cross(A - orig).normalized();
-  Eigen::Vector3f g(0, 0, 1);   // should be parameterize
-  bool reversed = false;
-  if (normal.dot(g) < 0) {
-    normal = - normal;
-    reversed = true;
-  }
-  Eigen::Vector3f p(point.pose.position.x, point.pose.position.y, point.pose.position.z);
-  double d = convex.distanceToPoint(p);
-  Eigen::Vector3f projected_point = p - d * normal;
-  // Eigen::Vector3d projected_point;
-  // convex.projectOnPlane(p, projected_point);
-#ifdef PROJECT_DEBUG
-  ROS_INFO("normal: [%f, %f, %f]", normal[0], normal[1], normal[2]);
-  ROS_INFO("plane d: %f", convex.getD());
-  ROS_INFO("distance: %f", d);
-#endif
-  // check the point is inside of the polygon or not...
-  bool insidep = convex.isInside(projected_point);
-  if (insidep) {
-#ifdef PROJECT_DEBUG
-    ROS_INFO("insidep: true");
-#endif
-  }
-  else {
-#ifdef PROJECT_DEBUG
-     ROS_INFO("insidep: false");
-#endif
-     d = DBL_MAX;
-  }
-  foot.header = point.header;
-  foot.pose.position.x = projected_point[0];
-  foot.pose.position.y = projected_point[1];
-  foot.pose.position.z = projected_point[2];
-  // compute orientation...
-  Eigen::Quaternionf q(point.pose.orientation.w,
-                       point.pose.orientation.x,
-                       point.pose.orientation.y,
-                       point.pose.orientation.z);
-  Eigen::Quaternionf q2;
-  Eigen::Matrix3f m = q.toRotationMatrix();
-  // Eigen::Vector3d e_x = m.col(0);
-  // Eigen::Vector3d e_y = m.col(1);
-  Eigen::Vector3f e_z = m.col(2);
-  Eigen::Quaternionf trans;
-  trans.setFromTwoVectors(e_z, normal); // ???
-  // we need to check if trans is flipped
-  
-  q2 = trans * q;
-  Eigen::Vector3f e_z2 = q2.toRotationMatrix().col(2);
-#ifdef PROJECT_DEBUG
-  ROS_INFO("e_z: [%f, %f, %f]", e_z[0], e_z[1], e_z[2]);
-  ROS_INFO("e_z2: [%f, %f, %f]", e_z2[0], e_z2[1], e_z2[2]);
-#endif
-  //q2 = q * trans;
-  foot.pose.orientation.x = q2.x();
-  foot.pose.orientation.y = q2.y();
-  foot.pose.orientation.z = q2.z();
-  foot.pose.orientation.w = q2.w();
-  return fabs(d);
-}
-
-void FootstepMarker::transformPolygon(
-  const geometry_msgs::PolygonStamped& polygon,
-  const std_msgs::Header& target_header,
-  std::vector<geometry_msgs::PointStamped>& output_points)
-{
-  for (size_t i = 0; i < polygon.polygon.points.size(); i++) {
-    geometry_msgs::PointStamped point, output;
-    point.header = polygon.header;
-    point.point.x = polygon.polygon.points[i].x;
-    point.point.y = polygon.polygon.points[i].y;
-    point.point.z = polygon.polygon.points[i].z;
-    tf_listener_->transformPoint(target_header.frame_id,
-                                 point,
-                                 output);
-    output_points.push_back(output);
-  }
-}
-
 bool FootstepMarker::projectMarkerToPlane()
 {
-  if (latest_planes_->polygons.size() == 0) {
-    ROS_WARN("it's not valid polygons");
-    return false;
-  }
-  //ROS_ERROR("projecting");
-  double min_distance = DBL_MAX;
-  geometry_msgs::PoseStamped min_pose;
-  for (size_t i = 0; i < latest_planes_->polygons.size(); i++) {
-    std::vector<geometry_msgs::PointStamped> transformed_points;
-    transformPolygon(latest_planes_->polygons[i],
-                     marker_pose_.header,
-                     transformed_points);
-    geometry_msgs::PoseStamped foot;
-    geometry_msgs::PoseStamped from;
-    from.pose = marker_pose_.pose;
-    from.header = marker_pose_.header;
-    double distance = projectPoseToPlane(transformed_points,
-                                         from, foot);
-    if (min_distance > distance) {
-      min_pose = foot;
-      min_distance = distance;
+  if (use_projection_service_) {
+    jsk_interactive_marker::SnapFootPrint snap;
+    snap.request.input_pose = marker_pose_;
+    snap.request.lleg_pose.orientation.w = 1.0;
+    snap.request.rleg_pose.orientation.w = 1.0;
+    snap.request.lleg_pose.position.y = footstep_margin_ / 2.0;
+    snap.request.rleg_pose.position.y = - footstep_margin_ / 2.0;
+    if (ros::service::call("project_footprint", snap) && snap.response.success) {
+      // Resolve tf
+      geometry_msgs::PoseStamped resolved_pose;
+      tf_listener_->transformPose(marker_pose_.header.frame_id,
+                                  snap.response.snapped_pose,
+                                  resolved_pose);
+      // Check distance to project
+      Eigen::Vector3d projected_point, marker_point;
+      tf::pointMsgToEigen(marker_pose_.pose.position, marker_point);
+      tf::pointMsgToEigen(resolved_pose.pose.position, projected_point);
+      if ((projected_point - marker_point).norm() < 0.3) {
+        server_->setPose("footstep_marker", resolved_pose.pose);
+        snapped_pose_pub_.publish(resolved_pose);
+        current_pose_pub_.publish(resolved_pose);
+        server_->applyChanges();
+        marker_pose_.pose = resolved_pose.pose;
+        return true;
+      }
+      else {
+        return false;
+      }
+    }
+    else {
+      ROS_WARN("Failed to snap footprint");
+      return false;
     }
   }
-  ROS_DEBUG_STREAM("min_distance: " << min_distance);
-  if (min_distance < 0.3) {     // smaller than 30cm
-    marker_pose_.pose = min_pose.pose;
-    snapped_pose_pub_.publish(min_pose);
-    // server_->setPose("footstep_marker", min_pose.pose);
-    // server_->applyChanges();
-    //ROS_WARN("projected");
-    return true;
-  }
-  else {
-    //ROS_WARN("not projected");
-    return false;
+  else if (use_projection_topic_) {
+    jsk_interactive_marker::SnapFootPrintInput msg;
+    msg.input_pose = marker_pose_;
+    msg.lleg_pose.orientation.w = 1.0;
+    msg.rleg_pose.orientation.w = 1.0;
+    msg.lleg_pose.position.y = footstep_margin_ / 2.0;
+    msg.rleg_pose.position.y = - footstep_margin_ / 2.0;
+    project_footprint_pub_.publish(msg);
+    return true;                // true...?
   }
 }
 
@@ -519,20 +547,20 @@ void FootstepMarker::processFeedbackCB(const visualization_msgs::InteractiveMark
   marker_pose_.pose = feedback->pose;
   marker_frame_id_ = feedback->header.frame_id;
   bool skip_plan = false;
-  if (feedback->event_type == visualization_msgs::InteractiveMarkerFeedback::MOUSE_UP) {
-    if (use_plane_snap_) {
-      if (!latest_planes_) {
-        ROS_WARN("no planes are available yet");
-      }
-      else {
-        // do something magicalc
+  geometry_msgs::PoseStamped input_pose;
+  current_pose_pub_.publish(marker_pose_);
+  try {
+    if (feedback->event_type == visualization_msgs::InteractiveMarkerFeedback::MOUSE_UP) {
+      if (use_plane_snap_) {
         skip_plan = !projectMarkerToPlane();
-        
       }
     }
+    if (feedback->event_type == visualization_msgs::InteractiveMarkerFeedback::MOUSE_UP && !skip_plan) {
+      if (always_planning_) planIfPossible();
+    }
   }
-  if (feedback->event_type == visualization_msgs::InteractiveMarkerFeedback::MOUSE_UP && !skip_plan) {
-    planIfPossible();
+  catch (tf2::TransformException& e) {
+    ROS_ERROR("Failed to lookup transformation: %s", e.what());
   }
 }
 
@@ -548,6 +576,23 @@ void FootstepMarker::resumeFootstep() {
   jsk_footstep_msgs::ExecFootstepsGoal goal;
   goal.strategy = jsk_footstep_msgs::ExecFootstepsGoal::RESUME;
   ac_exec_.sendGoal(goal);
+}
+
+void FootstepMarker::projectionCallback(const geometry_msgs::PoseStamped& pose)
+{
+  geometry_msgs::PoseStamped resolved_pose;
+  tf_listener_->transformPose(marker_pose_.header.frame_id,
+                              pose,
+                              resolved_pose);
+  // Check distance to project
+  Eigen::Vector3d projected_point, marker_point;
+  tf::pointMsgToEigen(marker_pose_.pose.position, marker_point);
+  tf::pointMsgToEigen(resolved_pose.pose.position, projected_point);
+  if ((projected_point - marker_point).norm() < 0.3) {
+    marker_pose_.pose = resolved_pose.pose;
+    snapped_pose_pub_.publish(resolved_pose);
+    current_pose_pub_.publish(resolved_pose);
+  }
 }
 
 void FootstepMarker::executeFootstep() {
@@ -590,9 +635,15 @@ void FootstepMarker::planIfPossible() {
     jsk_footstep_msgs::Footstep goal_left;
     goal_left.leg = jsk_footstep_msgs::Footstep::LEFT;
     goal_left.pose = getFootstepPose(true);
+    goal_left.dimensions.x = foot_size_x_;
+    goal_left.dimensions.y = foot_size_y_;
+    goal_left.dimensions.z = foot_size_z_;
     jsk_footstep_msgs::Footstep goal_right;
     goal_right.pose = getFootstepPose(false);
     goal_right.leg = jsk_footstep_msgs::Footstep::RIGHT;
+    goal_right.dimensions.x = foot_size_x_;
+    goal_right.dimensions.y = foot_size_y_;
+    goal_right.dimensions.z = foot_size_z_;
     goal_footstep.footsteps.push_back(goal_left);
     goal_footstep.footsteps.push_back(goal_right);
     goal.goal_footstep = goal_footstep;
@@ -603,11 +654,24 @@ void FootstepMarker::planIfPossible() {
     jsk_footstep_msgs::Footstep initial_left;
     initial_left.leg = jsk_footstep_msgs::Footstep::LEFT;
     initial_left.pose = lleg_initial_pose_;
-    initial_footstep.footsteps.push_back(initial_left);
+    initial_left.dimensions.x = foot_size_x_;
+    initial_left.dimensions.y = foot_size_y_;
+    initial_left.dimensions.z = foot_size_z_;
+    
     jsk_footstep_msgs::Footstep initial_right;
     initial_right.leg = jsk_footstep_msgs::Footstep::RIGHT;
     initial_right.pose = rleg_initial_pose_;
-    initial_footstep.footsteps.push_back(initial_right);
+    initial_right.dimensions.x = foot_size_x_;
+    initial_right.dimensions.y = foot_size_y_;
+    initial_right.dimensions.z = foot_size_z_;
+    if (lleg_first_) {
+      initial_footstep.footsteps.push_back(initial_left);
+      initial_footstep.footsteps.push_back(initial_right);
+    }
+    else {
+      initial_footstep.footsteps.push_back(initial_right);
+      initial_footstep.footsteps.push_back(initial_left);
+    }
     goal.initial_footstep = initial_footstep;
     ac_.sendGoal(goal, boost::bind(&FootstepMarker::planDoneCB, this, _1, _2));
   }
@@ -664,21 +728,17 @@ void FootstepMarker::moveMarkerCB(const geometry_msgs::PoseStamped::ConstPtr& ms
   marker_pose_ = transformed_pose;
   bool skip_plan = false;
   if (use_plane_snap_) {
-    if (!latest_planes_) {
-      ROS_WARN("no planes are available yet");
-    }
-    else {
-      // do something magicalc
-      skip_plan = !projectMarkerToPlane();
-      if (skip_plan) {
-        marker_pose_ = prev_pose;
-      }
+    // do something magicalc
+    skip_plan = !projectMarkerToPlane();
+    if (skip_plan) {
+      marker_pose_ = prev_pose;
     }
   }
   
   // need to solve TF
   server_->setPose("footstep_marker", transformed_pose.pose);
   server_->applyChanges();
+  current_pose_pub_.publish(marker_pose_);
   if (!skip_plan) {
     planIfPossible();
   }
@@ -768,25 +828,10 @@ void FootstepMarker::initializeInteractiveMarker() {
 FootstepMarker::~FootstepMarker() {
 }
 
-void FootstepMarker::planeCB(
-  const jsk_recognition_msgs::PolygonArray::ConstPtr& planes,
-  const jsk_recognition_msgs::ModelCoefficientsArray::ConstPtr& coefficients)
-{
-  boost::mutex::scoped_lock lock(plane_mutex_);
-  if (planes->polygons.size() > 0) {
-    latest_planes_ = planes;
-    latest_coefficients_ = coefficients;
-  }
-  else {
-    ROS_DEBUG_STREAM(__FUNCTION__ << " the size of the plane is 0, ignore");
-  }
-}
-
 int main(int argc, char** argv) {
   ros::init(argc, argv, "footstep_marker");
   FootstepMarker marker;
   ros::Rate r(10.0);
-  
   while (ros::ok()) {
     ros::spinOnce();
     marker.updateInitialFootstep();

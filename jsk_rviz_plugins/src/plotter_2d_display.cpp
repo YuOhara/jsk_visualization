@@ -42,7 +42,7 @@
 namespace jsk_rviz_plugins
 {
   Plotter2DDisplay::Plotter2DDisplay()
-    : rviz::Display()
+    : rviz::Display(), min_value_(0.0), max_value_(0.0)
   {
     update_topic_property_ = new rviz::RosTopicProperty(
       "Topic", "",
@@ -172,8 +172,10 @@ namespace jsk_rviz_plugins
   void Plotter2DDisplay::initializeBuffer()
   {
     buffer_.resize(buffer_length_);
-    min_value_ = -1.0;
-    max_value_ = 1.0;
+    if (min_value_ == 0.0 && max_value_ == 0.0) {
+      min_value_ = -1.0;
+      max_value_ = 1.0;
+    }
     for (size_t i = 0; i < buffer_length_; i++) {
       buffer_[i] = 0.0;
     }
@@ -182,10 +184,10 @@ namespace jsk_rviz_plugins
   void Plotter2DDisplay::onInitialize()
   {
     static int count = 0;
-    updateBufferSize();
     rviz::UniformStringStream ss;
     ss << "Plotter2DDisplayObject" << count++;
     overlay_.reset(new OverlayObject(ss.str()));
+    updateBufferSize();
     onEnable();
     updateShowValue();
     updateWidth();
@@ -222,8 +224,8 @@ namespace jsk_rviz_plugins
       double r
         = std::min(std::max((buffer_[buffer_.size() - 1] - min_value_) / (max_value_ - min_value_),
                             0.0), 1.0);
-      if (r > 0.5) {
-        double r2 = (r - 0.5) / 0.4;
+      if (r > 0.3) {
+        double r2 = (r - 0.3) / 0.7;
         fg_color.setRed((max_color_.red() - fg_color_.red()) * r2
                         + fg_color_.red());
         fg_color.setGreen((max_color_.green() - fg_color_.green()) * r2
@@ -313,7 +315,6 @@ namespace jsk_rviz_plugins
     if (!isEnabled()) {
       return;
     }
-    
     // add the message to the buffer
     double min_value = buffer_[0];
     double max_value = buffer_[0];

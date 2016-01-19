@@ -20,7 +20,7 @@ namespace jsk_interactive_marker {
   public:
     TransformableObject();
 
-    std::vector<visualization_msgs::InteractiveMarkerControl> makeRotateTransFixControl();
+    std::vector<visualization_msgs::InteractiveMarkerControl> makeRotateTransFixControl(unsigned int orientation_mode = visualization_msgs::InteractiveMarkerControl::FIXED);
 
     tf::TransformBroadcaster br;
     visualization_msgs::InteractiveMarker getInteractiveMarker();
@@ -30,17 +30,20 @@ namespace jsk_interactive_marker {
 
     visualization_msgs::Marker marker_;
     geometry_msgs::Pose pose_;
+    geometry_msgs::Pose control_offset_pose_;
     std::string name_;
     std::string frame_id_;
     std::string description_;
     int type_;
     bool display_interactive_manipulator_;
-
-    void setPose(geometry_msgs::Pose pose);
+    int interactive_manipulator_orientation_;
+    
+    void setPose(geometry_msgs::Pose pose, bool for_interactive_control=false);
     void addPose(geometry_msgs::Pose msg, bool relative=false);
     void publishTF();
     std::string getFrameId() { return frame_id_; }
-    geometry_msgs::Pose getPose(){return pose_;};
+    geometry_msgs::Pose getPose(bool for_interactive_control=false);
+    void setDisplayInteractiveManipulator(bool v);
     void setInteractiveMarkerSetting(InteractiveSettingConfig config);
     virtual bool setRadius(std_msgs::Float32 recieve_val){return false;};
     virtual bool setSmallRadius(std_msgs::Float32 recieve_val){return false;};
@@ -92,6 +95,30 @@ namespace jsk_interactive_marker
     float box_g_;
     float box_b_;
     float box_a_;
+  };
+};
+
+namespace jsk_interactive_marker
+{
+  class TransformableMesh: public TransformableObject
+  {
+  public:
+    TransformableMesh(std::string frame, std::string name, std::string description, std::string mesh_resource, bool mesh_use_embedded_materials);
+    visualization_msgs::Marker getVisualizationMsgMarker();
+    void setRGBA( float r , float g, float b, float a){mesh_r_=r;mesh_g_=g;mesh_b_=b;mesh_a_=a;};
+    void getRGBA(float &r , float &g, float &b, float &a){r=mesh_r_;g=mesh_g_;b=mesh_b_;a=mesh_a_;};
+    void setXYZ( float x , float y, float z){marker_scale_=x; return;};
+    void getXYZ(float &x, float &y, float&z){return;};
+    bool setX(std_msgs::Float32 x){marker_scale_=x.data; return true;};
+    bool setY(std_msgs::Float32 y){return true;};
+    bool setZ(std_msgs::Float32 z){return true;};
+    float getInteractiveMarkerScale(){return marker_scale_;};
+    float marker_scale_;
+    std::string mesh_resource_;
+    float mesh_r_;
+    float mesh_g_;
+    float mesh_b_;
+    float mesh_a_;
   };
 };
 

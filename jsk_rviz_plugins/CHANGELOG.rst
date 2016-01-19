@@ -2,6 +2,134 @@
 Changelog for package jsk_rviz_plugins
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.0.27 (2015-12-08)
+-------------------
+* [jsk_rviz_plugins/BoundingBoxArray] Fix coords orientation.
+  closes `#528 <https://github.com/jsk-ros-pkg/jsk_visualization/issues/528>`_
+* Use ccache to make it faster to generate object file
+* [jsk_rviz_plugins] Empty function implementation for undefined methods
+* [jsk_rviz_plugins] Use set_target_properties to set linker flags only
+  for libjsk_rviz_plugins.so
+* Use gcc -z defs to check undefined symbols in shared objects
+* Contributors: Kentaro Wada, Ryohei Ueda
+
+1.0.26 (2015-12-03)
+-------------------
+* [jsk_rviz_plugins] Install icons
+* [jsk_rviz_plugins] add landing_time_detector to display early landing/taking-off
+* [jsk_rviz_plugins/motor_states_temparature_decomposer] Decrease cpu load
+  by queue_size=1.
+  Fix for joints which does not have limit attribute.
+* [jsk_rviz_plugins] Add ~parent_link parameter for contact_state_publisher
+* [jsk_rviz_plugins] Add dynamic_reconfigure API to ContactStateMarker
+* [jsk_rviz_plugins] Check size of likelihood and labels of PolygonArray
+* [jsk_rviz_plugins/contact_state_marker.py] Support origin attribute of
+  visual tag
+* [jsk_rviz_plugins] update ambient sound visual paramter
+* [jsk_rviz_plugins] contact_state_marker.py to visualize hrpsys_ros_bridge/ContactStatesStamped
+* [jsk_rviz_plugins] Add script to publish marker of a robot link with
+  specified color
+* Contributors: Eisoku Kuroiwa, Kentaro Wada, Ryohei Ueda, Yuto Inagaki
+
+1.0.25 (2015-10-10)
+-------------------
+* [jsk_rviz_plugins] Fix font size of PeoplePositionMeasurementArray
+* [jsk_rviz_plugins] Add script for diagnostics sample
+* [jsk_rviz_plugins] Compile PeoplePositionMeasurementArrayDisplay
+* [jsk_rviz_plugins/VideoCapture] Check file permission to write correctly
+* [jsk_rviz_plugins] Use readthedocs to document
+* [jsk_rviz_plugins] Add index page for sphinx + readthedocs
+* [jsk_rviz_plugins] Use jsk_recognition_utils instead of jsk_pcl_ros to
+  speed up compilation
+* Contributors: Kentaro Wada, Ryohei Ueda
+
+1.0.24 (2015-09-08)
+-------------------
+* [jsk_rviz_plugins/PolygonArrayDisplay] Fix compilation error because of
+  the latest jsk_recongition_utils changes
+* [jsk_rqt_plugins/TwistStamped] Fix duplicated delete
+* [jsk_rviz_plugins] Allow width/height 0 image (fix segfault)
+* [jsk_rviz_plugins/PolygonArray] Coloring by labels and likelihood fields
+  of jsk_recognition_msgs/PolygonArray
+* [jsk_rviz_plugins/TwistStamped] Decide circle thickness according to
+  radius of circle
+* [jsk_rviz_plugins/BoundingBoxArray] Normalize value color gradation
+* [jsk_rviz_plugins/BoundingBoxArray] Update coloring method to support
+  coloring by values and labels.
+* [jsk_rviz_plugins] Remove footstep texts from rviz when reset the plugin
+* [jsk_rqt_plugins] Add sample launch for PolygonArray
+* [jsk_rviz_plugins/PolygonArray] Use enum property to choose coloring method
+* [jsk_rviz_plugins/TfTrajectory] Use status property to show error rather than
+  ROS_ERROR
+* [jsk_rviz_plugins/RobotCommandInterface] Use smaller icon size
+* [jsk_rviz_plugins] Use ~robot_command_buttons parameter to configure RobotCommandInterfaceAction
+* [jsk_rviz_plugins/TFTrajectory] Initialize line width
+* [jsk_rviz_plugins/TFTrajectory] Add movie link to README
+* [jsk_rviz_plugins] A rviz plugin to visualize tf trajectory as path
+* [jsk_rviz_plugins][OverlayImage] Automatically setup size with negative val
+* Contributors: Kentaro Wada, Ryohei Ueda
+
+1.0.23 (2015-07-15)
+-------------------
+* [jsk_rviz_plugins/PoseArray] Clear pose array if checkbox is unchecked
+* fix coords bug
+* Contributors: Ryohei Ueda, Yu Ohara
+
+1.0.22 (2015-06-24)
+-------------------
+* [jsk_rviz_plugins/OverlayImage] Support alpha channel if image_encoding
+  is BGRA8 or RGBA8
+* Contributors: Ryohei Ueda
+
+1.0.21 (2015-06-11)
+-------------------
+* [jsk_rviz_plugins/PolygonArrayDisplay] Cleanup codes to be within 80 columns
+* [jsk_rviz_plugins/BoundingBoxArray] Immediately apply change of attributes
+* [jsk_rviz_plugins/BoundingBoxArray] Refactor codes by splitting processMessages into several functions
+* [jsk_rviz_plugins/BoundingBoxArray] Use symmetrical radius for coordinates arrow
+* [jsk_rviz_plugins/BoundingBoxArray] Fix coding style around if/else/for
+* [jsk_rviz_plugins/BoundingBoxArray] Check if the size of box is nan
+* [jsk_rviz_plugins/BoundingBoxArray] Fix indent to be within 80 columns
+* Contributors: Ryohei Ueda
+
+1.0.20 (2015-05-04)
+-------------------
+* [jsk_rviz_plugins] add rotate speed to pictogram
+* [jsk_rviz_plugins] add String PopupMode for Pictogram
+* [jsk_rviz_plugins] Make arrow nodes invisible as default in PolygonArrayDisplay not to show normal if no needed
+* [jsk_rviz_plugins] Check size of BoundingBox
+* Contributors: Ryohei Ueda, Yuto Inagaki
+
+1.0.19 (2015-04-09)
+-------------------
+* [jsk_rviz_plugins] Fix initialization order in Plotter2DDisplay in order  to avoid call std::vector::resize with uninitialized length
+* [jsk_rviz_plugins] Obsolate SparseOccupancyGridArray, it's replaced by SimpleOccupancyGridArray
+* [jsk_rviz_plugins] Use jsk_pcl_ros/geo_util to reconstruct 3d
+  information in SimpleOccupancyGridArrayDisplay
+* [jsk_rviz_plugins] Add image of SimpleOccupancyGridArray
+* [jsk_rviz_plugins] Support auto coloring in SimpleOccupancyGridArray
+* [jsk_rviz_plugins] Support 4th parameter of plane coefficients in SimpleOccupancyGridArrayDisplay
+* [jsk_rviz_plugins] Add SimpleOccupancyGridArrayDisplay
+* [jsk_rviz_plugins] add tmp pose array display
+* [jsk_rviz_plugins] Change plotter color from 30%
+* add_mesh_model_in_transformable_marker
+* [jsk_rviz_plugins] Do not update min/max value when re-enabling Plotter2D
+* [jsk_rviz_plugins] Change color of plotter from 50 percent of max value
+* [jsk_rviz_plugins] add showing coords option for bounding box array display
+* [jsk_rviz_plugins] Add utility script to visualize difference between to tf frame on rviz
+* [jsk_rviz_plugins] Check direction vector is non-nan in PolygonArrayDisplay
+* [jsk_pcl_ros] Fix license: WillowGarage -> JSK Lab
+* [jsk_pcl_ros] Fix install path and install headers
+* [jsk_rviz_plugins] Do not show disabled properties of OverlayText, Plotter2D and PieChart
+* [jsk_pcl_ros] Make overlay sample more faster
+* [jsk_rviz_plugins] Change color from 60 percent of maximum value in PieChartDisplay and Plotter2DDisplay
+* [jsk_rviz_plugins] Draw PieChart at the first time
+* Remove rosbuild files
+* [jsk_rviz_plugins] Update PieChartDisplay only if value changed
+* [jsk_rviz_plugins] Do not change texture size and position in processMessage
+* [jsk_rviz_plugins] Optimize PieChartDisplay, draw image in update() method instead of processMessage
+* Contributors: Ryohei Ueda, Yu Ohara, Yuto Inagaki
+
 1.0.18 (2015-01-30)
 -------------------
 * add depends to cv_bridge instaed of opencv2

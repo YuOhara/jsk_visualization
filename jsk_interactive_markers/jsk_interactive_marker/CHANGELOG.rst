@@ -2,6 +2,125 @@
 Changelog for package jsk_interactive_marker
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.0.27 (2015-12-08)
+-------------------
+* Use ccache to make it faster to generate object file
+* Contributors: Kentaro Wada
+
+1.0.26 (2015-12-03)
+-------------------
+* [jsk_interactive_marker] add initialization for marker control
+* [jsk_interactive_marker] Add ~force_to_replan service interface to
+  footstep marker
+* Contributors: Ryohei Ueda, Yu Ohara
+
+1.0.25 (2015-10-10)
+-------------------
+* change service -> topic
+* add right click config with yaml
+* [jsk_interactive_markers] Ignore rvizconfig generated at build time
+* Contributors: Kentaro Wada, Yu Ohara
+
+1.0.24 (2015-09-08)
+-------------------
+* add jsk_recognition_msgs to catkin_package(CATKIN_DEPEND)
+* add wait for trans to avoid tf nan error
+* [jsk_interactive_markers/marker_6dof] Add ~initial_orientation parameter
+* publish pose with focused marker name in transformable_interactive_server
+* publish name of focused marker
+* [jsk_interactive_markers/marker_6dof] Remove axis marker when remove
+  6dof circle
+* [jsk_interactive_marker/marker_6dof] Add ~initial_x,y,z parameters to
+  specify initial position of the marker
+* [jsk_interactive_marker/marker_6dof] Add ~publish_tf parameter to
+  publish tf frame at the position of interactive marker.
+* [jsk_interactive_marker/marker_6dof] Fix indent
+* [jsk_interactive_marker] Add ~lock_joint_states and ~unlock_joint_states to furutaractive marker
+  not to move joint angles of the model even if reset_joint_states is called
+* [jsk_interactive_marker/footstep_marker] Publish current pose even if the marker is move via topic
+* [jsk_interactive_marker/urdf_control_marker] Call dynamic_tf untili success if it failed
+* [jsk_interactive_marker] Print error message if dynamic_tf is failed
+  in urdf_control_marker
+* [jsk_interactive_marker] Add hide/show empty service to transformable interactive server
+* [jsk_interactive_marker/footstep_marker] Add dynamic reconfirue API to toggle projection to pointcloud
+* [jsk_interactive_marker/footstep_marker] Always publish current pose of marker
+* [jsk_interactive_marker/footstep_marker] Publish snapped pose even if service and topic API
+  is used
+* [jsk_interactive_marker/footstep_marker] Fix initialization of marker pose
+* [jsk_interactive_marker] Use ros::ServiceClient::waitForExistence
+  instead of ros::service::waitForService in order to wait
+  dynamic_tf_publisher. Use different API leads potential bugs
+* [jsk_interactive_marker/urdf_model_marker] Fix furutaractive when it fails to lookup tf transformation.
+  1) use JSK_ROS_INFO, JSK_ROS_ERROR to output debug message
+  2) Fix handling of tf lookup exception not to ignore addChildLinkNames
+* [jsk_interactive_marker/urdf_control_marker] Visualize furutaractive marker without clicking urdf_control_marker by
+  calling dynamic_tf in constructor
+* [jsk_interactive_marker/footstep_marker] Set size of footsteps correctly
+* [jsk_interactive_marker/footstep_marker] Fix projection of footprint
+  when service interface is used
+* Contributors: JSK Lab Member, Kei Okada, MasakiMurooka, Ryohei Ueda
+
+1.0.23 (2015-07-15)
+-------------------
+* [jsk_interactive_marker] Install include directory and library
+* Contributors: Ryohei Ueda
+
+1.0.22 (2015-06-24)
+-------------------
+* [jsk_interactive_marker] Install binaries
+* [jsk_interactive_marker/footstep_marker] Enable ~footstep_margin parameter again
+* always publish pose of transformable model
+* Contributors: Ryohei Ueda, Masaki Murooka
+
+1.0.21 (2015-06-11)
+-------------------
+* [jsk_interactive_marker] Add menu to select rleg or lleg as the first step
+* [jsk_interactive_marker] Add menu to set heuristic
+* [jsk_interactive_marker] Add ~always_planning parameter to footstep_marker
+* [jsk_interactive_marker] Fix for terrain task
+* [jsk_interactive_marker] Add topic interface to footstep_marker
+* [jsk_interactive_marker] Decide footstep margin from robot name
+* [jsk_interactive_marker] enable to change mesh marker control size
+* [jsk_interactive_marker] add changing focus marker name line
+* Contributors: Ryohei Ueda, Yu Ohara
+
+1.0.20 (2015-05-04)
+-------------------
+* update furutaructive system. add load-ros-manifest. fix hand model path
+* [jsk_interactive_marker/urdf_control_marker] Transform pose respected to fixed_frame_id
+  when urdf_control_marker is moved by topic interface
+* [jsk_interactive_marker] Supress messages while loading urdf mesh
+* [jsk_interactive_marker] Add look ground menu to footstep_marker
+* [jsk_interactive_marker] Fix timestamp handling in transformable object when ~strict_tf:=false
+* Contributors: Masaki Murooka, Ryohei Ueda
+
+1.0.19 (2015-04-09)
+-------------------
+* [jsk_interactive_marker/transformable_object] Add ~stric_tf parameter to
+  relax timestamp soundness
+* [jsk_interactive_marker] Add transformation of lleg and rleg when
+  projecting goal footstep
+* [jsk_interactive_marker/footstep_marker] Add ~use_projection_service to
+  use other service to project footprint marker
+* [jsk_interactive_marker] Fix projection of marker coordinates onto grid
+  in footstep_marker
+* [jsk_interactive_marker] Re-project projected coords if error is not
+  small enough
+* [jsk_interative_marker] Use SimpleOccupancyGridArray to project
+  footprint marker
+* [jsk_interactive_marker] Check tf2 exception in footstep_marker
+* [jsk_interactive_marker] Check polygon to be snapped is valid or not
+* add topic for control control
+* use jsk_recognition_msgs instead of jsk_pcl_ros
+* add offset topic for interactive control
+* add configure for change control orientation mode
+* add_mesh_model_in_transformable_marker
+* suppress print in urdf_model_marker
+* set radius instead of diameter when primitive shape is cylinder
+* fix to set type correctly in getting dimenstions service
+* Remove rosbuild files
+* Contributors: Masaki Murooka, Ryohei Ueda, Yu Ohara, Yuki Furuta
+
 1.0.18 (2015-01-30)
 -------------------
 * add link to boost

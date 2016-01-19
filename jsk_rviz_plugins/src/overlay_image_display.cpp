@@ -51,7 +51,7 @@ namespace jsk_rviz_plugins
 
   OverlayImageDisplay::OverlayImageDisplay()
     : Display(), width_(128), height_(128), left_(128), top_(128), alpha_(0.8),
-      require_update_(false)
+      is_msg_available_(false), require_update_(false)
   {
     // setup properties
     update_topic_property_ = new rviz::RosTopicProperty(
@@ -134,7 +134,13 @@ namespace jsk_rviz_plugins
   {
     boost::mutex::scoped_lock(mutex_);
     msg_ = msg;
+    is_msg_available_ = true;
     require_update_ = true;
+    if ((width_property_->getInt() < 0) || (height_property_->getInt() < 0)) {
+      // automatically setup display size
+      updateWidth();
+      updateHeight();
+    }
   }
   
 
@@ -169,17 +175,40 @@ namespace jsk_rviz_plugins
     cv_bridge::CvImagePtr cv_ptr;
     try
     {
-      cv_ptr = cv_bridge::toCvCopy(msg_, sensor_msgs::image_encodings::RGB8);
-      cv::Mat mat = cv_ptr->image;
-      ScopedPixelBuffer buffer = overlay_->getBuffer();
-      QImage Hud = buffer.getQImage(*overlay_);
-      for (int i = 0; i < overlay_->getTextureWidth(); i++) {
-        for (int j = 0; j < overlay_->getTextureHeight(); j++) {
-          QColor color(mat.data[j * mat.step + i * mat.elemSize() + 0],
-                       mat.data[j * mat.step + i * mat.elemSize() + 1],
-                       mat.data[j * mat.step + i * mat.elemSize() + 2],
-                       alpha_ * 255.0);
-          Hud.setPixel(i, j, color.rgba());
+      if (msg_->width == 0 || msg_->height == 0) {
+        // image width/height and texture width/height should be same
+        // but they are not when input image width/height is 0
+        return;
+      }
+      else if (msg_->encoding == sensor_msgs::image_encodings::RGBA8 ||
+          msg_->encoding == sensor_msgs::image_encodings::BGRA8) {
+        cv_ptr = cv_bridge::toCvCopy(msg_, sensor_msgs::image_encodings::RGBA8);
+        cv::Mat mat = cv_ptr->image;
+        ScopedPixelBuffer buffer = overlay_->getBuffer();
+        QImage Hud = buffer.getQImage(*overlay_);
+        for (int i = 0; i < overlay_->getTextureWidth(); i++) {
+          for (int j = 0; j < overlay_->getTextureHeight(); j++) {
+            QColor color(mat.data[j * mat.step + i * mat.elemSize() + 0],
+                         mat.data[j * mat.step + i * mat.elemSize() + 1],
+                         mat.data[j * mat.step + i * mat.elemSize() + 2],
+                         mat.data[j * mat.step + i * mat.elemSize() + 3]);
+            Hud.setPixel(i, j, color.rgba());
+          }
+        }
+      }
+      else {
+        cv_ptr = cv_bridge::toCvCopy(msg_, sensor_msgs::image_encodings::RGB8);
+        cv::Mat mat = cv_ptr->image;
+        ScopedPixelBuffer buffer = overlay_->getBuffer();
+        QImage Hud = buffer.getQImage(*overlay_);
+        for (int i = 0; i < overlay_->getTextureWidth(); i++) {
+          for (int j = 0; j < overlay_->getTextureHeight(); j++) {
+            QColor color(mat.data[j * mat.step + i * mat.elemSize() + 0],
+                         mat.data[j * mat.step + i * mat.elemSize() + 1],
+                         mat.data[j * mat.step + i * mat.elemSize() + 2],
+                         alpha_ * 255.0);
+            Hud.setPixel(i, j, color.rgba());
+          }
         }
       }
     }
@@ -198,13 +227,47 @@ namespace jsk_rviz_plugins
   void OverlayImageDisplay::updateWidth()
   {
     boost::mutex::scoped_lock lock(mutex_);
-    width_ = width_property_->getInt();
+    int input_value = width_property_->getInt();
+    if (input_value >= 0) {
+      width_ = input_value;
+    } else {
+      if (is_msg_available_) {  // will automatically set width
+        if (height_property_->getInt() == -1) {
+          // same size as input image
+          width_ = msg_->width;
+          height_ = msg_->height;
+        } else {
+          // same scale as height
+          float scale = (float)height_ / msg_->height;
+          width_ = (int)(scale * msg_->width);
+        }
+      } else {
+        width_ = 128;
+      }
+    }
   }
   
   void OverlayImageDisplay::updateHeight()
   {
     boost::mutex::scoped_lock lock(mutex_);
-    height_ = height_property_->getInt();
+    int input_value = height_property_->getInt();
+    if (input_value >= 0) {
+      height_ = input_value;
+    } else {
+      if (is_msg_available_) {  // will automatically set height
+        if (width_property_->getInt() == -1) {
+          // same size as input image
+          width_ = msg_->width;
+          height_ = msg_->height;
+        } else {
+          // same scale as width
+          float scale = (float)width_ / msg_->width;
+          height_ = (int)(scale * msg_->height);
+        }
+      } else {
+        height_ = 128;
+      }
+    }
   }
 
   void OverlayImageDisplay::updateTop()

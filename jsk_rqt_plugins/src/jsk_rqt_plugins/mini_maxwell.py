@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 from rqt_gui_py.plugin import Plugin
-from python_qt_binding.QtGui import QAction, QIcon, QMenu, QWidget, \
-QPainter, QColor, QFont, QBrush, QPen
+from python_qt_binding.QtGui import (QAction, QIcon, QMenu, QWidget,
+                                     QPainter, QColor, QFont, QBrush, 
+                                     QPen)
 from python_qt_binding.QtCore import Qt, QTimer, qWarning, Slot, QEvent
 from threading import Lock
 import rospy
@@ -38,7 +39,7 @@ class DRCEnvironmentViewerWidget(QWidget):
                                                        Time, self.nextWhiteoutTimeCallback)
         self._update_plot_timer = QTimer(self)
         self._update_plot_timer.timeout.connect(self.redraw)
-        self._update_plot_timer.start(40)
+        self._update_plot_timer.start(1000 / 15)
     def isDisabledCallback(self, msg):
         with self.lock:
             self.is_disabled = msg.data

@@ -5,7 +5,7 @@
   <description>
     jsk interactive markers
   </description>
-  <version>1.0.18</version>
+  <version>1.0.27</version>
   <author email="furuta@jsk.t.u-tokyo.ac.jp">furuta</author>
   <maintainer email="furuta@jsk.t.u-tokyo.ac.jp">furuta</maintainer>
   <license>BSD</license>
@@ -34,7 +34,13 @@
   <build_depend>roscpp</build_depend>
   <build_depend>roslib</build_depend>
   <build_depend>message_filters</build_depend>
+  <build_depend>message_generation</build_depend>
   <build_depend>jsk_rviz_plugins</build_depend>
+  <build_depend>pr2eus_moveit</build_depend>
+  <build_depend>jsk_recognition_msgs</build_depend>
+  <build_depend>jsk_topic_tools</build_depend> 
+  <build_depend>yaml-cpp</build_depend>
+  <run_depend>message_runtime</run_depend>
   <run_depend>roseus</run_depend>
   <run_depend>tinyxml</run_depend>
   <run_depend>geometry_msgs</run_depend>
@@ -54,10 +60,10 @@
   <run_depend>roslib</run_depend>
   <run_depend>message_filters</run_depend>
   <run_depend>jsk_rviz_plugins</run_depend>
-  <build_depend>jsk_topic_tools</build_depend>
   <run_depend>jsk_topic_tools</run_depend>
-  <build_depend>jsk_recognition_msgs</build_depend>
   <run_depend>jsk_recognition_msgs</run_depend>
+  <run_depend>pr2eus_moveit</run_depend>
+  <run_depend>yaml-cpp</run_depend>
 </package>
 
 

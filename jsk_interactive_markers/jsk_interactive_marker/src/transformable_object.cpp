@@ -6,25 +6,39 @@
 
 using namespace jsk_interactive_marker;
 
+inline geometry_msgs::Pose inverse(geometry_msgs::Pose pose){
+  Eigen::Affine3d pose_eigen;
+  tf::poseMsgToEigen(pose, pose_eigen);
+  tf::poseEigenToMsg(pose_eigen.inverse(), pose);
+  return pose;
+}
+
+
 TransformableObject::TransformableObject(){
   ROS_INFO("Init TransformableObject");
-  pose_.orientation.x = 0;
-  pose_.orientation.y = 0;
-  pose_.orientation.z = 0;
-  pose_.orientation.w = 1;
-
+  control_offset_pose_.orientation.x = 0;
+  control_offset_pose_.orientation.y = 0;
+  control_offset_pose_.orientation.z = 0;
+  control_offset_pose_.orientation.w = 1;
+  pose_ = control_offset_pose_;
   display_interactive_manipulator_ = true;
+}
+
+void TransformableObject::setDisplayInteractiveManipulator(bool v)
+{
+  display_interactive_manipulator_ = v;
 }
 
 void TransformableObject::setInteractiveMarkerSetting(InteractiveSettingConfig config){
   display_interactive_manipulator_ = config.display_interactive_manipulator;
+  interactive_manipulator_orientation_ = config.interactive_manipulator_orientation;
 }
 
-std::vector<visualization_msgs::InteractiveMarkerControl> TransformableObject::makeRotateTransFixControl(){
+std::vector<visualization_msgs::InteractiveMarkerControl> TransformableObject::makeRotateTransFixControl(unsigned int orientation_mode){
   visualization_msgs::InteractiveMarkerControl control;
 
   std::vector<visualization_msgs::InteractiveMarkerControl> controls;
-  control.orientation_mode = visualization_msgs::InteractiveMarkerControl::FIXED;
+  control.orientation_mode = orientation_mode;
   control.orientation.w = 1;
   control.orientation.x = 1;
   control.orientation.y = 0;
@@ -74,7 +88,7 @@ void TransformableObject::addMarker(visualization_msgs::InteractiveMarker &int_m
 void TransformableObject::addControl(visualization_msgs::InteractiveMarker &int_marker)
 {
   if(display_interactive_manipulator_){
-    std::vector<visualization_msgs::InteractiveMarkerControl> rotate_controls = makeRotateTransFixControl();
+    std::vector<visualization_msgs::InteractiveMarkerControl> rotate_controls = makeRotateTransFixControl(interactive_manipulator_orientation_);
     int_marker.controls.insert(int_marker.controls.end(), rotate_controls.begin(), rotate_controls.end());
   }
 };
@@ -92,13 +106,38 @@ visualization_msgs::InteractiveMarker TransformableObject::getInteractiveMarker(
   return int_marker;
 };
 
-void TransformableObject::setPose(geometry_msgs::Pose pose){
-  pose_=pose;
+void TransformableObject::setPose(geometry_msgs::Pose pose, bool for_interactive_control){
+  if(for_interactive_control) {
+    pose_ = pose;
+  }
+  else {
+    Eigen::Affine3d control_offset_eigen;
+    tf::poseMsgToEigen(control_offset_pose_, control_offset_eigen);
+    Eigen::Affine3d pose_eigen;
+    tf::poseMsgToEigen(pose, pose_eigen);
+    tf::poseEigenToMsg(pose_eigen * control_offset_eigen, pose_);
+  }
 }
+
+geometry_msgs::Pose TransformableObject::getPose(bool for_interactive_control){
+  if(for_interactive_control) {
+    return pose_;
+  }
+  else{
+    geometry_msgs::Pose pose;
+    Eigen::Affine3d control_offset_eigen;
+    tf::poseMsgToEigen(control_offset_pose_, control_offset_eigen);
+    Eigen::Affine3d pose_eigen;
+    tf::poseMsgToEigen(pose_, pose_eigen);
+    tf::poseEigenToMsg(pose_eigen * control_offset_eigen.inverse(), pose);
+    //return pose;
+    return pose;
+  }
+}
+
 
 void TransformableObject::addPose(geometry_msgs::Pose msg, bool relative){
   Eigen::Vector3d original_p(msg.position.x, msg.position.y, msg.position.z);
-
   Eigen::Quaterniond original_q;
   tf::quaternionMsgToEigen(pose_.orientation, original_q);
   Eigen::Quaterniond diff_q;
@@ -120,7 +159,7 @@ void TransformableObject::addPose(geometry_msgs::Pose msg, bool relative){
 
 void TransformableObject::publishTF(){
   tf::Transform transform;
-  tf::poseMsgToTF(pose_, transform);
+  tf::poseMsgToTF(getPose(), transform);
   br.sendTransform(tf::StampedTransform(transform, ros::Time::now(), frame_id_, name_));
 }
 
@@ -148,6 +187,7 @@ namespace jsk_interactive_marker{
     marker_.color.g = cylinder_g_;
     marker_.color.b = cylinder_b_;
     marker_.color.a = cylinder_a_;
+    marker_.pose = control_offset_pose_;
     return marker_;
   }
 }
@@ -232,6 +272,7 @@ namespace jsk_interactive_marker{
 }
 
 namespace jsk_interactive_marker{
+
   TransformableBox::TransformableBox( float length , float r, float g, float b, float a, std::string frame, std::string name, std::string description){
     box_x_ = box_y_ = box_z_ = length;
 
@@ -270,6 +311,29 @@ namespace jsk_interactive_marker{
     marker_.color.g = box_g_;
     marker_.color.b = box_b_;
     marker_.color.a = box_a_;
+    return marker_;
+  }
+}
+
+namespace jsk_interactive_marker{
+
+  TransformableMesh::TransformableMesh( std::string frame, std::string name, std::string description, std::string mesh_resource, bool mesh_use_embedded_materials){
+    marker_scale_ = 0.5;
+    marker_.type = visualization_msgs::Marker::MESH_RESOURCE;
+    type_ = jsk_rviz_plugins::TransformableMarkerOperate::MESH_RESOURCE;
+    marker_.mesh_resource = mesh_resource;
+    marker_.mesh_use_embedded_materials = mesh_use_embedded_materials;
+    frame_id_ = frame;
+    name_ = name;
+    description_ = description;
+  }
+
+  visualization_msgs::Marker TransformableMesh::getVisualizationMsgMarker(){
+    marker_.color.r = mesh_r_;
+    marker_.color.g = mesh_g_;
+    marker_.color.b = mesh_b_;
+    marker_.color.a = mesh_a_;
+    marker_.pose = inverse(control_offset_pose_);
     return marker_;
   }
 }

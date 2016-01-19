@@ -9,11 +9,17 @@ from matplotlib.colors import colorConverter
 from rqt_py_common.topic_helpers import is_slot_numeric
 from rqt_plot.rosplot import ROSData as _ROSData
 from rqt_plot.rosplot import RosPlotException
-from matplotlib.collections import PolyCollection, PathCollection, LineCollection
+from matplotlib.collections import (PolyCollection, 
+                                    PathCollection, LineCollection)
 import matplotlib
-
+import matplotlib.patches as mpatches
 import rospkg
 import rospy
+from cStringIO import StringIO
+import cv2
+from cv_bridge import CvBridge
+from sensor_msgs.msg import Image
+from jsk_recognition_msgs.msg import HistogramWithRange, HistogramWithRangeBin
 
 import os, sys
 import argparse
@@ -63,14 +69,6 @@ class HistogramPlot(Plugin):
     @staticmethod
     def add_arguments(parser):
         group = parser.add_argument_group('Options for rqt_histogram plugin')
-        # group.add_argument('-P', '--pause', action='store_true', dest='start_paused',
-        #     help='Start in paused state')
-        # group.add_argument('-L', '--line', action='store_true', dest='show_line',
-        #     help='Show lines rather than polygon representation')
-        # group.add_argument('--no-legend', action='store_true', dest='no_legend',
-        #     help='do not show legend')
-        # group.add_argument('-B', '--buffer', dest='buffer', action="store",
-        #     help='the length of the buffer', default=100, type=int)
         group.add_argument('topics', nargs='?', default=[], help='Topics to plot')
         
 class HistogramPlotWidget(QWidget):
@@ -82,6 +80,7 @@ class HistogramPlotWidget(QWidget):
         ui_file = os.path.join(rp.get_path('jsk_rqt_plugins'), 
                                'resource', 'plot_histogram.ui')
         loadUi(ui_file, self)
+        self.cv_bridge = CvBridge()
         self.subscribe_topic_button.setIcon(QIcon.fromTheme('add'))
         self.pause_button.setIcon(QIcon.fromTheme('media-playback-pause'))
         self.clear_button.setIcon(QIcon.fromTheme('edit-clear'))
@@ -101,7 +100,6 @@ class HistogramPlotWidget(QWidget):
         self._update_plot_timer.start(self._redraw_interval)
     @Slot('QDropEvent*')
     def dropEvent(self, event):
-        print "hello"
         if event.mimeData().hasText():
             topic_name = str(event.mimeData().text())
         else:
@@ -117,6 +115,8 @@ class HistogramPlotWidget(QWidget):
         self.subscribe_topic(str(self.topic_edit.text()))
 
     def subscribe_topic(self, topic_name):
+        self.topic_with_field_name = topic_name
+        self.pub_image = rospy.Publisher(topic_name + "/histogram_image", Image)
         if not self._rosdata:
             self._rosdata = ROSData(topic_name, self._start_time)
         else:
@@ -144,18 +144,32 @@ class HistogramPlotWidget(QWidget):
         if not self._rosdata:
             return
         data_x, data_y = self._rosdata.next()
+
         if len(data_y) == 0:
             return
-        xs = data_y[-1]
         axes = self.data_plot._canvas.axes
         axes.cla()
-        axes.set_xlim(xmin=0, xmax=len(xs))
-        pos = np.arange(len(xs))
+        if self._rosdata.sub.data_class is HistogramWithRange:
+            xs = [y.count for y in data_y[-1].bins]
+            pos = [y.min_value for y in data_y[-1].bins]
+            widths = [y.max_value - y.min_value for y in data_y[-1].bins]
+            axes.set_xlim(xmin=pos[0], xmax=pos[-1] + widths[-1])
+        else:
+            xs = data_y[-1]
+            pos = np.arange(len(xs))
+            widths = [1] * len(xs)
+            axes.set_xlim(xmin=0, xmax=len(xs))
         #axes.xticks(range(5))
-        for p, x in zip(pos, xs):
-            axes.bar(p, x, color='r', align='center')
+        for p, x, w in zip(pos, xs, widths):
+            axes.bar(p, x, color='r', align='center', width=w)
+        axes.legend([self.topic_with_field_name], prop={'size': '8'})
         self.data_plot._canvas.draw()
-        
+        buffer = StringIO()
+        self.data_plot._canvas.figure.savefig(buffer, format="png")
+        buffer.seek(0)
+        img_array = np.asarray(bytearray(buffer.read()), dtype=np.uint8)
+        img = cv2.imdecode(img_array, cv2.CV_LOAD_IMAGE_COLOR)
+        self.pub_image.publish(self.cv_bridge.cv2_to_imgmsg(img, "bgr8"))
 class MatHistogramPlot(QWidget):
     class Canvas(FigureCanvas):
         def __init__(self, parent=None):

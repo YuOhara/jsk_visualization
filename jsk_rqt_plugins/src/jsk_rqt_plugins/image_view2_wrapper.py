@@ -1,15 +1,18 @@
 from rqt_gui_py.plugin import Plugin
 import python_qt_binding.QtGui as QtGui
-from python_qt_binding.QtGui import QAction, QIcon, QMenu, QWidget, \
-     QPainter, QColor, QFont, QBrush, QPen, QMessageBox, QSizePolicy, \
-     QImage, QPixmap, qRgb, QComboBox
-     
-from python_qt_binding.QtCore import Qt, QTimer, qWarning, Slot, \
-     QEvent, QSize
-from threading import Lock
+from python_qt_binding.QtGui import (QAction, QIcon, QMenu, QWidget,
+                                     QPainter, QColor, QFont, QBrush,
+                                     QPen, QMessageBox, QSizePolicy,
+                                     QImage, QPixmap, qRgb, QComboBox, 
+                                     QDialog, QPushButton)
+from python_qt_binding.QtCore import (Qt, QTimer, qWarning, Slot,
+                                      QEvent, QSize, pyqtSignal, 
+                                      pyqtSlot)
+from threading import Lock, Thread
 import rospy
 import python_qt_binding.QtCore as QtCore
 from std_msgs.msg import Bool, Time
+import time
 import math
 from resource_retriever import get_filename
 import yaml
@@ -21,6 +24,24 @@ from cv_bridge import CvBridge, CvBridgeError
 from image_view2.msg import MouseEvent
 from sensor_msgs.msg import Image
 
+
+class ComboBoxDialog(QDialog):
+    def __init__(self, parent=None):
+        super(ComboBoxDialog, self).__init__()
+        self.number = 0
+        vbox = QtGui.QVBoxLayout(self)
+        self.combo_box = QComboBox(self)
+        self.combo_box.activated.connect(self.onActivated)
+        vbox.addWidget(self.combo_box)
+        button = QPushButton()
+        button.setText("Done")
+        button.clicked.connect(self.buttonCallback)
+        vbox.addWidget(button)
+        self.setLayout(vbox)
+    def buttonCallback(self, event):
+        self.close()
+    def onActivated(self, number):
+        self.number = number
 class ImageView2Plugin(Plugin):
     """
     rqt wrapper for image_view2
@@ -34,6 +55,9 @@ class ImageView2Plugin(Plugin):
         self._widget.save_settings(plugin_settings, instance_settings)
     def restore_settings(self, plugin_settings, instance_settings):
         self._widget.restore_settings(plugin_settings, instance_settings)
+    def trigger_configuration(self):
+        self._widget.trigger_configuration()
+        
 
 class ScaledLabel(QtGui.QLabel):
     def __init__(self, *args, **kwargs):
@@ -50,11 +74,14 @@ class ImageView2Widget(QWidget):
     """
     cv_image = None
     pixmap = None
+    repaint_trigger = pyqtSignal()
     def __init__(self):
         super(ImageView2Widget, self).__init__()
         self.left_button_clicked = False
-        self.lock = Lock()
         
+        self.repaint_trigger.connect(self.redraw)
+        self.lock = Lock()
+        self.need_to_rewrite = False
         self.bridge = CvBridge()
         self.image_sub = None
         self.event_pub = None
@@ -63,28 +90,25 @@ class ImageView2Widget(QWidget):
         self.label.setSizePolicy(QSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored))
         #self.label.installEventFilter(self)
         vbox = QtGui.QVBoxLayout(self)
-        # first add combobox
-        self.combo_box = QComboBox(self)
-        self.combo_box.activated.connect(self.onActivated)
-        vbox.addWidget(self.combo_box)
         vbox.addWidget(self.label)
         self.setLayout(vbox)
         
-        self._update_plot_timer = QTimer(self)
-        self._update_plot_timer.timeout.connect(self.redraw)
-        self._update_plot_timer.start(40)
-        
         self._image_topics = []
-        self._update_topic_timer = QTimer(self)
-        self._update_topic_timer.timeout.connect(self.updateTopics)
-        self._update_topic_timer.start(1)
+        self._update_topic_thread = Thread(target=self.updateTopics)
+        self._update_topic_thread.start()
         
         self._active_topic = None
         self.setMouseTracking(True)
+        self.label.setMouseTracking(True)
+        self._dialog = ComboBoxDialog()
         self.show()
+    def trigger_configuration(self):
+        self._dialog.exec_()
+        self.setupSubscriber(self._image_topics[self._dialog.number])
     def setupSubscriber(self, topic):
         if self.image_sub:
             self.image_sub.unregister()
+        rospy.loginfo("Subscribing %s" % (topic + "/marked"))
         self.image_sub = rospy.Subscriber(topic + "/marked",
                                           Image, 
                                           self.imageCallback)
@@ -103,22 +127,30 @@ class ImageView2Widget(QWidget):
             elif msg.encoding == "rgb8":
                 self.cv_image = cv_image
             self.numpy_image = np.asarray(self.cv_image)
+            self.need_to_rewrite = True
+            self.repaint_trigger.emit()
     def updateTopics(self):
         need_to_update = False
         for (topic, topic_type) in rospy.get_published_topics():
             if topic_type == "sensor_msgs/Image":
-                if not topic in self._image_topics:
-                    self._image_topics.append(topic)
-                    need_to_update = True
+                with self.lock:
+                    if not topic in self._image_topics:
+                        self._image_topics.append(topic)
+                        need_to_update = True
         if need_to_update:
-            self._image_topics = sorted(self._image_topics)
-            self.combo_box.clear()
-            for topic in self._image_topics:
-                self.combo_box.addItem(topic)
-            if self._active_topic:
-                self.combo_box.setCurrentIndex(self._image_topics.index(self._active_topic))
+            with self.lock:
+                self._image_topics = sorted(self._image_topics)
+                self._dialog.combo_box.clear()
+                for topic in self._image_topics:
+                    self._dialog.combo_box.addItem(topic)
+                if self._active_topic:
+                    self._dialog.combo_box.setCurrentIndex(self._image_topics.index(self._active_topic))
+        time.sleep(1)
+    @pyqtSlot()
     def redraw(self):
         with self.lock:
+            if not self.need_to_rewrite:
+                return
             if self.cv_image != None:
                 size = self.cv_image.shape
                 img = QImage(self.cv_image.data,
@@ -142,22 +174,21 @@ class ImageView2Widget(QWidget):
         y_offset = (label_height - pixmap_height) / 2.0 + label_y
         return (e.x() - x_offset, e.y()- y_offset)
     def mouseMoveEvent(self, e):
-        if self.left_button_clicked:
-            msg = MouseEvent()
-            msg.header.stamp = rospy.Time.now()
-            msg.type = MouseEvent.MOUSE_MOVE
-            msg.x, msg.y = self.mousePosition(e)
-            msg.width = self.label.pixmap().width()
-            msg.height = self.label.pixmap().height()
-            if self.event_pub:
-                self.event_pub.publish(msg)
+        msg = MouseEvent()
+        msg.header.stamp = rospy.Time.now()
+        msg.type = MouseEvent.MOUSE_MOVE
+        msg.x, msg.y = self.mousePosition(e)
+        msg.width = self.label.pixmap().width()
+        msg.height = self.label.pixmap().height()
+        if self.event_pub:
+            self.event_pub.publish(msg)
     def mousePressEvent(self, e):
         msg = MouseEvent()
         msg.header.stamp = rospy.Time.now()
         if e.button() == Qt.LeftButton:
             msg.type = MouseEvent.MOUSE_LEFT_DOWN
             self.left_button_clicked = True
-        elif msg.type == Qt.RightButton:
+        elif e.button() == Qt.RightButton:
             msg.type = MouseEvent.MOUSE_RIGHT_DOWN
         msg.width = self.label.pixmap().width()
         msg.height = self.label.pixmap().height()
@@ -175,22 +206,11 @@ class ImageView2Widget(QWidget):
             msg.x, msg.y = self.mousePosition(e)
             if self.event_pub:
                 self.event_pub.publish(msg)
-    def eventFilter(self, widget, event):
-        if not self.pixmap:
-            return QtGui.QMainWindow.eventFilter(self, widget, event)
-        if (event.type() == QtCore.QEvent.Resize and
-            widget is self.label):
-            self.label.setPixmap(self.pixmap.scaled(
-                self.label.width(), self.label.height(),
-                QtCore.Qt.KeepAspectRatio))
-            return True
-        return QtGui.QMainWindow.eventFilter(self, widget, event)
     def save_settings(self, plugin_settings, instance_settings):
         if self._active_topic:
             instance_settings.set_value("active_topic", self._active_topic)
     def restore_settings(self, plugin_settings, instance_settings):
         if instance_settings.value("active_topic"):
             topic = instance_settings.value("active_topic")
-            self.combo_box.addItem(topic)
+            self._dialog.combo_box.addItem(topic)
             self.setupSubscriber(topic)
-        

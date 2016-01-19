@@ -4,10 +4,13 @@ using namespace jsk_interactive_marker;
 
 TransformableInteractiveServer::TransformableInteractiveServer():n_(new ros::NodeHandle("~")){
   n_->param("display_interactive_manipulator", display_interactive_manipulator_, true);
+  n_->param("interactive_manipulator_orientation", interactive_manipulator_orientation_ , 0);
   n_->param("torus_udiv", torus_udiv_, 20);
   n_->param("torus_vdiv", torus_vdiv_, 20);
+  n_->param("strict_tf", strict_tf_, false);
   tf_listener_.reset(new tf::TransformListener);
-  setpose_sub_ = n_->subscribe("set_pose", 1, &TransformableInteractiveServer::setPose, this);
+  setpose_sub_ = n_->subscribe<geometry_msgs::PoseStamped>("set_pose", 1, boost::bind(&TransformableInteractiveServer::setPose, this, _1, false));
+  setcontrolpose_sub_ = n_->subscribe<geometry_msgs::PoseStamped>("set_control_pose", 1, boost::bind(&TransformableInteractiveServer::setPose, this, _1, true));
   setcolor_sub_ = n_->subscribe("set_color", 1, &TransformableInteractiveServer::setColor, this);
 
   set_r_sub_ = n_->subscribe("set_radius", 1, &TransformableInteractiveServer::setRadius, this);
@@ -18,14 +21,21 @@ TransformableInteractiveServer::TransformableInteractiveServer():n_(new ros::Nod
 
   addpose_sub_ = n_->subscribe("add_pose", 1, &TransformableInteractiveServer::addPose, this);
   addpose_relative_sub_ = n_->subscribe("add_pose_relative", 1, &TransformableInteractiveServer::addPoseRelative, this);
-
+  
+  setcontrol_relative_sub_ = n_->subscribe("set_control_relative_pose", 1, &TransformableInteractiveServer::setControlRelativePose, this);
+  
   setrad_sub_ = n_->subscribe("set_radius", 1, &TransformableInteractiveServer::setRadius, this);
 
-  focus_text_pub_ = n_->advertise<jsk_rviz_plugins::OverlayText>("focus_marker_name", 1);
-  focus_pose_pub_ = n_->advertise<jsk_rviz_plugins::OverlayText>("focus_marker_pose", 1);
+  focus_name_text_pub_ = n_->advertise<jsk_rviz_plugins::OverlayText>("focus_marker_name_text", 1);
+  focus_pose_text_pub_ = n_->advertise<jsk_rviz_plugins::OverlayText>("focus_marker_pose_text", 1);
+  focus_object_marker_name_pub_ = n_->advertise<std_msgs::String>("focus_object_marker_name", 1);
+  pose_pub_ = n_->advertise<geometry_msgs::PoseStamped>("pose", 1);
+  pose_with_name_pub_ = n_->advertise<jsk_interactive_marker::PoseStampedWithName>("pose_with_name", 1);
 
-  get_pose_srv_ = n_->advertiseService("get_pose", &TransformableInteractiveServer::getPoseService, this);
-  set_pose_srv_ = n_->advertiseService("set_pose", &TransformableInteractiveServer::setPoseService, this);
+  get_pose_srv_ = n_->advertiseService<jsk_interactive_marker::GetTransformableMarkerPose::Request, jsk_interactive_marker::GetTransformableMarkerPose::Response>("get_pose", boost::bind(&TransformableInteractiveServer::getPoseService, this, _1, _2, false));
+  get_control_pose_srv_ = n_->advertiseService<jsk_interactive_marker::GetTransformableMarkerPose::Request, jsk_interactive_marker::GetTransformableMarkerPose::Response>("get_control_pose", boost::bind(&TransformableInteractiveServer::getPoseService, this, _1, _2, true));
+  set_pose_srv_ = n_->advertiseService<jsk_interactive_marker::SetTransformableMarkerPose::Request ,jsk_interactive_marker::SetTransformableMarkerPose::Response>("set_pose", boost::bind(&TransformableInteractiveServer::setPoseService, this, _1, _2, false));
+  set_control_pose_srv_ = n_->advertiseService<jsk_interactive_marker::SetTransformableMarkerPose::Request ,jsk_interactive_marker::SetTransformableMarkerPose::Response>("set_control_pose", boost::bind(&TransformableInteractiveServer::setPoseService, this, _1, _2, true));
   get_color_srv_ = n_->advertiseService("get_color", &TransformableInteractiveServer::getColorService, this);
   set_color_srv_ = n_->advertiseService("set_color", &TransformableInteractiveServer::setColorService, this);
   get_focus_srv_ = n_->advertiseService("get_focus", &TransformableInteractiveServer::getFocusService, this);
@@ -34,6 +44,8 @@ TransformableInteractiveServer::TransformableInteractiveServer():n_(new ros::Nod
   get_exist_srv_ = n_->advertiseService("get_existence", &TransformableInteractiveServer::getExistenceService, this);
   set_dimensions_srv =  n_->advertiseService("set_dimensions", &TransformableInteractiveServer::setDimensionsService, this);
   get_dimensions_srv =  n_->advertiseService("get_dimensions", &TransformableInteractiveServer::getDimensionsService, this);
+  hide_srv_ = n_->advertiseService("hide", &TransformableInteractiveServer::hideService, this);
+  show_srv_ = n_->advertiseService("show", &TransformableInteractiveServer::showService, this);
   marker_dimensions_pub_ = n_->advertise<jsk_interactive_marker::MarkerDimensions>("marker_dimensions", 1);
   request_marker_operate_srv_ = n_->advertiseService("request_marker_operate", &TransformableInteractiveServer::requestMarkerOperateService, this);
 
@@ -43,6 +55,12 @@ TransformableInteractiveServer::TransformableInteractiveServer():n_(new ros::Nod
   config_srv_->setCallback (f);
 
   tf_timer = n_->createTimer(ros::Duration(0.05), &TransformableInteractiveServer::tfTimerCallback, this);
+
+  // initialize yaml-menu-handler
+  std::string yaml_filename;
+  std::string default_filename;
+  n_->param("yaml_filename", yaml_filename, std::string(""));
+  yaml_menu_handler_ptr_ = boost::make_shared <YamlMenuHandler> (n_, yaml_filename);
 
   server_ = new interactive_markers::InteractiveMarkerServer("simple_marker");
 }
@@ -59,6 +77,7 @@ void TransformableInteractiveServer::configCallback(InteractiveSettingConfig &co
   {
     boost::mutex::scoped_lock lock(mutex_);
     display_interactive_manipulator_ = config.display_interactive_manipulator;
+    interactive_manipulator_orientation_ = config.interactive_manipulator_orientation;
     for (std::map<string, TransformableObject* >::iterator itpairstri = transformable_objects_map_.begin(); itpairstri != transformable_objects_map_.end(); itpairstri++) {
       TransformableObject* tobject = itpairstri->second;
       tobject->setInteractiveMarkerSetting(config);
@@ -73,9 +92,11 @@ void TransformableInteractiveServer::processFeedback(
   switch ( feedback->event_type )
     {
     case visualization_msgs::InteractiveMarkerFeedback::MOUSE_DOWN:
+    case visualization_msgs::InteractiveMarkerFeedback::MENU_SELECT:
       focus_object_marker_name_ = feedback->marker_name;
       focusTextPublish();
       focusPosePublish();
+      focusObjectMarkerNamePublish();
       break;
 
     case visualization_msgs::InteractiveMarkerFeedback::POSE_UPDATE:
@@ -84,9 +105,13 @@ void TransformableInteractiveServer::processFeedback(
         geometry_msgs::PoseStamped input_pose_stamped;
         input_pose_stamped.header = feedback->header;
         input_pose_stamped.pose = feedback->pose;
-        setPoseWithTfTransformation(tobject, input_pose_stamped);
-      }else
+        setPoseWithTfTransformation(tobject, input_pose_stamped, true);
+      }else{
         ROS_ERROR("Invalid ObjectId Request Received %s", feedback->marker_name.c_str());
+      }
+      focusTextPublish();
+      focusPosePublish();
+      focusObjectMarkerNamePublish();
       break;
     }
 }
@@ -153,18 +178,22 @@ void TransformableInteractiveServer::updateTransformableObject(TransformableObje
 {
   visualization_msgs::InteractiveMarker int_marker = tobject->getInteractiveMarker();
   server_->insert(int_marker, boost::bind( &TransformableInteractiveServer::processFeedback,this, _1));
+  yaml_menu_handler_ptr_->applyMenu(server_, focus_object_marker_name_);
   server_->applyChanges();
 }
 
-void TransformableInteractiveServer::setPose(geometry_msgs::PoseStamped msg){
+void TransformableInteractiveServer::setPose(const geometry_msgs::PoseStampedConstPtr &msg_ptr, bool for_interactive_control){
   if (transformable_objects_map_.find(focus_object_marker_name_) == transformable_objects_map_.end()) { return; }
   TransformableObject* tobject =  transformable_objects_map_[focus_object_marker_name_];
-  setPoseWithTfTransformation(tobject, msg);
-  server_->setPose(focus_object_marker_name_, msg.pose, msg.header);
+  setPoseWithTfTransformation(tobject, *msg_ptr, for_interactive_control);
+  std_msgs::Header header = msg_ptr->header;
+  header.frame_id = tobject->getFrameId();
+  server_->setPose(focus_object_marker_name_, tobject->pose_, header);
+  yaml_menu_handler_ptr_->applyMenu(server_, focus_object_marker_name_);
   server_->applyChanges();
 }
 
-bool TransformableInteractiveServer::getPoseService(jsk_interactive_marker::GetTransformableMarkerPose::Request &req,jsk_interactive_marker::GetTransformableMarkerPose::Response &res)
+bool TransformableInteractiveServer::getPoseService(jsk_interactive_marker::GetTransformableMarkerPose::Request &req,jsk_interactive_marker::GetTransformableMarkerPose::Response &res, bool for_interactive_control)
 {
   TransformableObject* tobject;
   geometry_msgs::PoseStamped transformed_pose_stamped;
@@ -177,12 +206,12 @@ bool TransformableInteractiveServer::getPoseService(jsk_interactive_marker::GetT
   }
   transformed_pose_stamped.header.stamp = ros::Time::now();
   transformed_pose_stamped.header.frame_id = tobject->frame_id_;
-  transformed_pose_stamped.pose = tobject->getPose();
+  transformed_pose_stamped.pose = tobject->getPose(for_interactive_control);
   res.pose_stamped = transformed_pose_stamped;
   return true;
 }
 
-bool TransformableInteractiveServer::setPoseService(jsk_interactive_marker::SetTransformableMarkerPose::Request &req,jsk_interactive_marker::SetTransformableMarkerPose::Response &res)
+bool TransformableInteractiveServer::setPoseService(jsk_interactive_marker::SetTransformableMarkerPose::Request &req,jsk_interactive_marker::SetTransformableMarkerPose::Response &res, bool for_interactive_control)
 {
   TransformableObject* tobject;
   geometry_msgs::PoseStamped transformed_pose_stamped;
@@ -191,13 +220,16 @@ bool TransformableInteractiveServer::setPoseService(jsk_interactive_marker::SetT
     tobject = transformable_objects_map_[focus_object_marker_name_];
   }else{
     if (transformable_objects_map_.find(req.target_name) == transformable_objects_map_.end()) { return true; }
+    focus_object_marker_name_ = req.target_name;
     tobject = transformable_objects_map_[req.target_name];
   }
-  if(setPoseWithTfTransformation(tobject, req.pose_stamped)){
-    server_->setPose(focus_object_marker_name_, req.pose_stamped.pose, req.pose_stamped.header);
+  if(setPoseWithTfTransformation(tobject, req.pose_stamped, for_interactive_control)){
+    std_msgs::Header header = req.pose_stamped.header;
+    header.frame_id = tobject->getFrameId();
+    server_->setPose(focus_object_marker_name_, tobject->pose_, header);
+    yaml_menu_handler_ptr_->applyMenu(server_, focus_object_marker_name_);
     server_->applyChanges();
   }
-
   return true;
 }
 
@@ -241,6 +273,7 @@ bool TransformableInteractiveServer::setFocusService(jsk_interactive_marker::Set
   focus_object_marker_name_ = req.target_name;
   focusTextPublish();
   focusPosePublish();
+  focusObjectMarkerNamePublish();
   return true;
 }
 
@@ -286,6 +319,7 @@ bool TransformableInteractiveServer::setDimensionsService(jsk_interactive_marker
       tobject->setRZ(req.dimensions.radius, req.dimensions.z);
     } else if (tobject->getType() == jsk_rviz_plugins::TransformableMarkerOperate::TORUS) {
       tobject->setRSR(req.dimensions.radius, req.dimensions.small_radius);
+    } else if (tobject->getType() == jsk_rviz_plugins::TransformableMarkerOperate::MESH_RESOURCE) {
     }
     publishMarkerDimensions();
     updateTransformableObject(tobject);
@@ -310,12 +344,39 @@ bool TransformableInteractiveServer::getDimensionsService(jsk_interactive_marker
       tobject->getRZ(res.dimensions.radius, res.dimensions.z);
     } else if (tobject->getType() == jsk_rviz_plugins::TransformableMarkerOperate::TORUS) {
       tobject->getRSR(res.dimensions.radius, res.dimensions.small_radius);
+    } else if (tobject->getType() == jsk_rviz_plugins::TransformableMarkerOperate::MESH_RESOURCE) {
     }
+
     res.dimensions.type = tobject->getType();
   }
   return true;
 }
 
+bool TransformableInteractiveServer::hideService(std_srvs::Empty::Request& req,
+                                                 std_srvs::Empty::Response& res)
+{
+  for (std::map<string, TransformableObject* >::iterator itpairstri = transformable_objects_map_.begin(); 
+       itpairstri != transformable_objects_map_.end();
+       ++itpairstri) {
+    TransformableObject* tobject = itpairstri->second;
+    tobject->setDisplayInteractiveManipulator(false);
+    updateTransformableObject(tobject);
+  }
+  return true;
+}
+
+bool TransformableInteractiveServer::showService(std_srvs::Empty::Request& req,
+                                                 std_srvs::Empty::Response& res)
+{
+  for (std::map<string, TransformableObject* >::iterator itpairstri = transformable_objects_map_.begin();
+       itpairstri != transformable_objects_map_.end(); 
+       ++itpairstri) {
+    TransformableObject* tobject = itpairstri->second;
+    tobject->setDisplayInteractiveManipulator(true);
+    updateTransformableObject(tobject);
+  }
+  return true;
+}
 void TransformableInteractiveServer::publishMarkerDimensions()
 {
   TransformableObject* tobject;
@@ -329,6 +390,7 @@ void TransformableInteractiveServer::publishMarkerDimensions()
       tobject->getRZ(marker_dimensions.radius, marker_dimensions.z);
     } else if (tobject->getType() == jsk_rviz_plugins::TransformableMarkerOperate::TORUS) {
       tobject->getRSR(marker_dimensions.radius, marker_dimensions.small_radius);
+    } else if (tobject->getType() == jsk_rviz_plugins::TransformableMarkerOperate::MESH_RESOURCE) {
     }
     marker_dimensions.type = tobject->type_;
     marker_dimensions_pub_.publish(marker_dimensions);
@@ -345,6 +407,8 @@ bool TransformableInteractiveServer::requestMarkerOperateService(jsk_rviz_plugin
       insertNewCylinder(req.operate.frame_id, req.operate.name, req.operate.description);
     } else if (req.operate.type == jsk_rviz_plugins::TransformableMarkerOperate::TORUS) {
       insertNewTorus(req.operate.frame_id, req.operate.name, req.operate.description);
+    } else if (req.operate.type == jsk_rviz_plugins::TransformableMarkerOperate::MESH_RESOURCE) {
+      insertNewMesh(req.operate.frame_id, req.operate.name, req.operate.description, req.operate.mesh_resource, req.operate.mesh_use_embedded_materials);
     }
     return true;
     break;
@@ -384,6 +448,10 @@ bool TransformableInteractiveServer::requestMarkerOperateService(jsk_rviz_plugin
       new_tobject = transformable_objects_map_[req.operate.name];
       new_tobject->setRSR(r, sr);
       new_tobject->setPose(tobject->getPose());
+    } else if (tobject->type_ == jsk_rviz_plugins::TransformableMarkerOperate::MESH_RESOURCE) {
+      insertNewMesh(tobject->frame_id_, req.operate.name, req.operate.description, req.operate.mesh_resource, req.operate.mesh_use_embedded_materials);
+      new_tobject = transformable_objects_map_[req.operate.name];
+      new_tobject->setPose(tobject->getPose());
     }
     float r, g, b, a;
     tobject->getRGBA(r, g, b, a);
@@ -408,6 +476,21 @@ void TransformableInteractiveServer::addPoseRelative(geometry_msgs::Pose msg){
   updateTransformableObject(tobject);
 }
 
+void TransformableInteractiveServer::setControlRelativePose(geometry_msgs::Pose msg){
+  if (transformable_objects_map_.find(focus_object_marker_name_) == transformable_objects_map_.end()) { return; }
+  TransformableObject* tobject = transformable_objects_map_[focus_object_marker_name_];
+  geometry_msgs::Pose pose = tobject->getPose(); //reserve marker pose
+  tobject->control_offset_pose_ = msg;
+  updateTransformableObject(tobject);
+  tobject->setPose(pose);
+  std_msgs::Header header;
+  header.frame_id = tobject->getFrameId();
+  header.stamp = ros::Time::now();
+  server_->setPose(focus_object_marker_name_, tobject->pose_, header);
+  yaml_menu_handler_ptr_->applyMenu(server_, focus_object_marker_name_);
+  server_->applyChanges();
+}
+
 void TransformableInteractiveServer::focusTextPublish(){
   jsk_rviz_plugins::OverlayText focus_text;
   focus_text.text = focus_object_marker_name_;
@@ -425,7 +508,7 @@ void TransformableInteractiveServer::focusTextPublish(){
   focus_text.fg_color.a = 1;
   focus_text.line_width = 1;
   focus_text.text_size = 30;
-  focus_text_pub_.publish(focus_text);
+  focus_name_text_pub_.publish(focus_text);
 }
 
 void TransformableInteractiveServer::focusPosePublish(){
@@ -454,7 +537,13 @@ void TransformableInteractiveServer::focusPosePublish(){
   focus_pose.fg_color.a = 1;
   focus_pose.line_width = 1;
   focus_pose.text_size = 15;
-  focus_pose_pub_.publish(focus_pose);
+  focus_pose_text_pub_.publish(focus_pose);
+}
+
+void TransformableInteractiveServer::focusObjectMarkerNamePublish(){
+  std_msgs::String msg;
+  msg.data = focus_object_marker_name_;
+  focus_object_marker_name_pub_.publish(msg);
 }
 
 void TransformableInteractiveServer::insertNewBox(std::string frame_id, std::string name, std::string description)
@@ -475,23 +564,32 @@ void TransformableInteractiveServer::insertNewTorus( std::string frame_id, std::
   insertNewObject(transformable_torus, name);
 }
 
+void TransformableInteractiveServer::insertNewMesh( std::string frame_id, std::string name, std::string description, std::string mesh_resource, bool mesh_use_embedded_materials)
+{
+  TransformableMesh* transformable_mesh = new TransformableMesh(frame_id, name, description, mesh_resource, mesh_use_embedded_materials);
+  insertNewObject(transformable_mesh, name);
+}
+
 void TransformableInteractiveServer::insertNewObject( TransformableObject* tobject , std::string name )
 {
   SetInitialInteractiveMarkerConfig(tobject);
   visualization_msgs::InteractiveMarker int_marker = tobject->getInteractiveMarker();
   transformable_objects_map_[name] = tobject;
   server_->insert(int_marker, boost::bind( &TransformableInteractiveServer::processFeedback,this, _1));
+  yaml_menu_handler_ptr_->applyMenu(server_, name);
   server_->applyChanges();
 
   focus_object_marker_name_ = name;
   focusTextPublish();
   focusPosePublish();
+  focusObjectMarkerNamePublish();
 }
 
 void TransformableInteractiveServer::SetInitialInteractiveMarkerConfig( TransformableObject* tobject )
 {
   InteractiveSettingConfig config;
   config.display_interactive_manipulator = display_interactive_manipulator_;
+  config.interactive_manipulator_orientation = interactive_manipulator_orientation_;
   tobject->setInteractiveMarkerSetting(config);
 }
 
@@ -503,6 +601,7 @@ void TransformableInteractiveServer::eraseObject( std::string name )
     focus_object_marker_name_ = "";
     focusTextPublish();
     focusPosePublish();
+    focusObjectMarkerNamePublish();
   }
   delete transformable_objects_map_[name];
   transformable_objects_map_.erase(name);
@@ -527,14 +626,29 @@ void TransformableInteractiveServer::tfTimerCallback(const ros::TimerEvent&)
   tobject->publishTF();
 }
 
-bool TransformableInteractiveServer::setPoseWithTfTransformation(TransformableObject* tobject, geometry_msgs::PoseStamped pose_stamped)
+bool TransformableInteractiveServer::setPoseWithTfTransformation(TransformableObject* tobject, geometry_msgs::PoseStamped pose_stamped, bool for_interactive_control)
 {
   try {
     geometry_msgs::PoseStamped transformed_pose_stamped;
-    if (tf_listener_->waitForTransform(tobject->getFrameId(),
-                                       pose_stamped.header.frame_id, pose_stamped.header.stamp, ros::Duration(1.0))) {
+    jsk_interactive_marker::PoseStampedWithName transformed_pose_stamped_with_name;
+    ros::Time stamp;
+    if (strict_tf_) {
+      stamp = pose_stamped.header.stamp;
+    }
+    else {
+      stamp = ros::Time(0.0);
+      pose_stamped.header.stamp = stamp;
+    }
+    if (!strict_tf_ || tf_listener_->waitForTransform(tobject->getFrameId(),
+                                                      pose_stamped.header.frame_id, stamp, ros::Duration(1.0))) {
       tf_listener_->transformPose(tobject->getFrameId(), pose_stamped, transformed_pose_stamped);
-      tobject->setPose(transformed_pose_stamped.pose);
+      tobject->setPose(transformed_pose_stamped.pose, for_interactive_control);
+      transformed_pose_stamped.pose=tobject->getPose(true);
+      pose_pub_.publish(transformed_pose_stamped);
+      transformed_pose_stamped_with_name.pose = transformed_pose_stamped;
+      transformed_pose_stamped_with_name.name = tobject->name_;
+      //transformed_pose_stamped_with_name.name = focus_object_marker_name_;
+      pose_with_name_pub_.publish(transformed_pose_stamped_with_name);
     }
     else {
       ROS_ERROR("failed to lookup transform %s -> %s", tobject->getFrameId().c_str(), 
