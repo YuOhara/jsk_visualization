@@ -37,7 +37,7 @@ add_message_files(
   FILES JointTrajectoryPointWithType.msg JointTrajectoryWithType.msg MarkerDimensions.msg MarkerMenu.msg MarkerPose.msg MoveModel.msg MoveObject.msg SnapFootPrintInput.msg PoseStampedWithName.msg
 )
 add_service_files(DIRECTORY srv
-  FILES MarkerSetPose.srv SetPose.srv GetJointState.srv GetType.srv SetMarkerDimensions.srv GetMarkerDimensions.srv GetTransformableMarkerPose.srv SetTransformableMarkerPose.srv GetTransformableMarkerColor.srv SetTransformableMarkerColor.srv GetTransformableMarkerFocus.srv SetTransformableMarkerFocus.srv GetTransformableMarkerExistence.srv IndexRequest.srv
+  FILES MarkerSetPose.srv SetPose.srv GetJointState.srv GetType.srv SetMarkerDimensions.srv GetMarkerDimensions.srv GetTransformableMarkerPose.srv SetTransformableMarkerPose.srv GetTransformableMarkerColor.srv SetTransformableMarkerColor.srv GetTransformableMarkerFocus.srv SetTransformableMarkerFocus.srv GetTransformableMarkerExistence.srv IndexRequest.srv SetParentMarker.srv RemoveParentMarker.srv
   SnapFootPrint.srv
   SetHeuristic.srv)
 
@@ -122,6 +122,7 @@ add_dependencies(pointcloud_cropper ${PROJECT_NAME}_generate_messages_cpp ${PROJ
 add_executable(transformable_server_sample
   src/transformable_object.cpp
   src/yaml_menu_handler.cpp
+  src/parent_and_child_interactive_marker_server.cpp
   src/transformable_interactive_server.cpp
   src/transformable_server_sample.cpp
 )
