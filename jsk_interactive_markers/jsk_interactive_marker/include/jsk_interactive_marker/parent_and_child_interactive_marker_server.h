@@ -8,6 +8,7 @@
 #include <jsk_interactive_marker/RemoveParentMarker.h>
 #include <tf/transform_listener.h>
 #include <eigen_conversions/eigen_msg.h>
+#include <boost/shared_ptr.hpp>
 
 namespace jsk_interactive_marker
 {
@@ -30,15 +31,19 @@ namespace jsk_interactive_marker
   class ParentAndChildInteractiveMarkerServer: public interactive_markers::InteractiveMarkerServer
   {
   public:
+    class FeedbackSynthesizer{
+    public:
+      FeedbackSynthesizer(FeedbackCallback c1, FeedbackCallback c2) {cb1=c1; cb2=c2;}
+      FeedbackCallback cb1, cb2;
+      void call_func(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback) {if(cb1) cb1(feedback); if(cb2) cb2(feedback);}
+    };
+
     ParentAndChildInteractiveMarkerServer(const std::string &topic_ns, const std::string &server_id="", bool spin_thread = false);
     ros::ServiceServer set_parent_srv_;
     ros::ServiceServer remove_parent_srv_;
     ros::ServiceServer get_marker_pose_srv_;
     tf::TransformListener tf_listener_;
     std::string topic_server_name_;
-    std::string get_marker_pose_service_name_;
-    std::string set_parent_service_name_;
-    std::string remove_parent_service_name_;
     // map of <map of markers with server> // including self association
     // access: child -> <map <parent_topic_name & parent_marker_name & pose>>
     std::map <std::string, ParentMarkerInformation> association_list_;
@@ -46,6 +51,7 @@ namespace jsk_interactive_marker
     // access: parent server -> subscriber
     std::map <std::string, ros::Subscriber> parent_update_subscribers_; // self association is not included
     std::map <std::string, ros::Subscriber> parent_feedback_subscribers_; // self association is not included
+    std::map <std::string, boost::shared_ptr <FeedbackSynthesizer> > callback_map_;
     std::map <std::string, int> parent_subscriber_nums_;
     bool setParentService(jsk_interactive_marker::SetParentMarker::Request &req, jsk_interactive_marker::SetParentMarker::Response &res);
     void renewPoseWithParent(std::map <std::string, ParentMarkerInformation>::iterator assoc_it_, geometry_msgs::Pose parent_pose, std_msgs::Header parent_header);
@@ -60,10 +66,13 @@ namespace jsk_interactive_marker
     void selfFeedbackCb(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback);
     void parentUpdateCb(const visualization_msgs::InteractiveMarkerUpdateConstPtr &update, std::string parent_topic_name);
     void parentFeedbackCb(const visualization_msgs::InteractiveMarkerFeedbackConstPtr &feedback, std::string parent_topic_name);
+    // overwrite public functions
     void applyChanges();
     bool setCallback(const std::string &name, FeedbackCallback feedback_cb, uint8_t feedback_type=DEFAULT_FEEDBACK_CB);
+    void insert(const visualization_msgs::InteractiveMarker &int_marker);
+    void insert(const visualization_msgs::InteractiveMarker &int_marker, FeedbackCallback feedback_cb, uint8_t feedback_type=DEFAULT_FEEDBACK_CB);
+    bool erase(const std::string &name);
   };
-
 }
 
 #endif
